@@ -3,6 +3,8 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent
+# 项目根目录（server/ 的上一级）
+PROJECT_ROOT = BASE_DIR.parent
 
 
 class Settings(BaseSettings):
@@ -20,10 +22,10 @@ class Settings(BaseSettings):
 
     admin_password: str = "admin123"
 
-    database_url: str = f"sqlite:///{BASE_DIR / 'data' / 'app.db'}"
+    database_url: str = f"sqlite:///{PROJECT_ROOT / 'data' / 'app.db'}"
 
-    data_dir: Path = BASE_DIR / "data"
-    chroma_dir: Path = BASE_DIR / "chroma_db"
+    data_dir: Path = PROJECT_ROOT / "data"
+    chroma_dir: Path = PROJECT_ROOT / "data" / "chroma_db"
 
     encryption_key: str = "change-me-in-production-32bytes!!"
 
@@ -33,7 +35,7 @@ class Settings(BaseSettings):
     )
 
 
-settings = settings = Settings()
+settings = Settings()
 
 DATA_DIR = settings.data_dir
 DATA_DIR.mkdir(parents=True, exist_ok=True)

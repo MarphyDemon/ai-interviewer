@@ -16,9 +16,27 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     }
   }
 
+  async function pollStatus(id: number, interval = 1000, maxRetries = 60) {
+    for (let i = 0; i < maxRetries; i++) {
+      await new Promise((r) => setTimeout(r, interval))
+      const status = await knowledgeApi.getKnowledgeStatus(id)
+      const doc = docs.value.find((d) => d.id === id)
+      if (doc) doc.status = status.status as KnowledgeDoc['status']
+      if (status.status === 'ready' || status.status === 'failed') {
+        // 状态完成后重新拉取列表，获取 LLM 提取的 position/difficulty/title/tags
+        await fetchDocs()
+        break
+      }
+    }
+  }
+
   async function upload(files: File[]) {
-    await knowledgeApi.uploadKnowledge(files)
+    const res = await knowledgeApi.uploadKnowledge(files)
     await fetchDocs()
+    // 轮询所有新上传的文档状态
+    for (const id of res.ids) {
+      pollStatus(id)
+    }
   }
 
   async function remove(id: number) {

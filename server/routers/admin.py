@@ -9,6 +9,7 @@ from server.database import get_session
 from server.models import LLMConfig
 from server.config import settings
 from server.services.common import mask_api_key
+from server.services.crypto_service import encrypt, decrypt
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -88,7 +89,7 @@ async def list_configs(
             "id": c.id,
             "name": c.name,
             "baseUrl": c.base_url,
-            "apiKeyMasked": mask_api_key(c.api_key),
+            "apiKeyMasked": mask_api_key(decrypt(c.api_key)),
             "model": c.model,
             "isActive": c.is_active,
         }
@@ -105,7 +106,7 @@ async def create_config(
     cfg = LLMConfig(
         name=req.name,
         base_url=req.baseUrl,
-        api_key=req.apiKey,
+        api_key=encrypt(req.apiKey),
         model=req.model,
     )
     session.add(cfg)
@@ -129,7 +130,7 @@ async def update_config(
     if req.baseUrl is not None:
         cfg.base_url = req.baseUrl
     if req.apiKey is not None:
-        cfg.api_key = req.apiKey
+        cfg.api_key = encrypt(req.apiKey)
     if req.model is not None:
         cfg.model = req.model
     session.add(cfg)

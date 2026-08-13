@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Optional
 from sqlmodel import Session, select
-from server.models import Interview, InterviewMessage, Report, Resume, KnowledgeDoc
+from server.models import Interview, InterviewMessage, Report, Resume, KnowledgeDoc, JobDescription
 from server.services.llm_service import llm_chat
 from server.services.rag_service import search
 from server.embedding.siliconflow import get_embedding
@@ -12,6 +12,7 @@ async def generate_first_question(
     session: Session,
     interview: Interview,
     resume: Optional[Resume] = None,
+    jd: Optional[JobDescription] = None,
     lang: str = "en",
 ) -> dict:
     knowledge_context = await _retrieve_knowledge(session, interview.position, interview.difficulty)
@@ -20,12 +21,17 @@ async def generate_first_question(
     if resume:
         resume_text = resume.parsed_text[:2000]
 
+    jd_text = ""
+    if jd:
+        jd_text = jd.content[:3000]
+
     system_prompt = _build_system_prompt(
         position=interview.position,
         difficulty=interview.difficulty,
         style=interview.style,
         knowledge=knowledge_context,
         resume_text=resume_text,
+        jd_text=jd_text,
         lang=lang,
     )
 
@@ -55,11 +61,18 @@ async def process_answer(
 
     knowledge_context = await _retrieve_knowledge(session, interview.position, interview.difficulty)
 
+    jd_text = ""
+    if interview.jd_id:
+        jd = session.get(JobDescription, interview.jd_id)
+        if jd:
+            jd_text = jd.content[:3000]
+
     system_prompt = _build_system_prompt(
         position=interview.position,
         difficulty=interview.difficulty,
         style=interview.style,
         knowledge=knowledge_context,
+        jd_text=jd_text,
     )
 
     if remaining <= 0:
@@ -80,11 +93,30 @@ async def process_answer(
 async def generate_report(session: Session, interview: Interview) -> Report:
     messages = _load_conversation(session, interview.id)
     resume = session.get(Resume, interview.resume_id) if interview.resume_id else None
+    jd = session.get(JobDescription, interview.jd_id) if interview.jd_id else None
     knowledge = await _retrieve_knowledge(session, interview.position, interview.difficulty)
 
     conversation_text = "\n".join(
         [f"{'Interviewer' if m['role'] == 'assistant' else 'Candidate'}: {m['content']}" for m in messages]
     )
+
+    jd_text = jd.content[:3000] if jd else ""
+    match_section = ""
+    if jd_text:
+        match_section = f"""
+  "matchScore": 0-100的整数（候选人对该 JD 的整体匹配度）,
+  "matchBreakdown": [{{"requirement": "JD中明确列出的某条要求", "status": "met|partial|gap", "evidence": "依据候选人答题或简历的简短证据"}}],
+"""
+    match_instruction = ""
+    if jd_text:
+        match_instruction = f"""
+Additional requirement — produce a structured person-job match against the JD:
+- "matchScore": 0-100 integer, overall fit for THIS specific JD.
+- "matchBreakdown": one entry per KEY requirement explicitly listed in the JD. status ∈ met(满足)/partial(部分)/gap(不足). evidence must reference the candidate's answers or resume.
+- "jobFit": a concise overall summary of fit + main gaps + recommendation.
+"""
+    else:
+        match_instruction = '\n- "jobFit": a concise overall job-fit assessment text.'
 
     prompt = f"""Based on the interview transcript below, generate a comprehensive review report. Output JSON:
 {{
@@ -92,9 +124,10 @@ async def generate_report(session: Session, interview: Interview) -> Report:
   "dimensionScores": [{{"label": "Technical Knowledge", "score": 0}}, {{"label": "Communication", "score": 0}}, {{"label": "Job Fit", "score": 0}}, {{"label": "Problem Solving", "score": 0}}, {{"label": "Technical Depth", "score": 0}}],
   "summary": "Overall summary text",
   "perQuestionReviews": [{{"question": "...", "answer": "...", "review": "...", "referenceAnswer": "...", "score": 0}}],
-  "resumeReview": {{"structureScore": 0, "positionMatch": 0, "highlights": [], "weaknesses": []}},
+  "resumeReview": {{"structureScore": 0, "positionMatch": 0, "highlights": [], "weaknesses": []}},{match_section}
   "jobFit": "Job fit assessment text"
 }}
+{match_instruction}
 
 Interview transcript:
 {conversation_text}
@@ -104,6 +137,9 @@ Reference knowledge:
 
 Resume (if available):
 {resume.parsed_text[:2000] if resume else 'N/A'}
+
+Job Description (if available):
+{jd_text if jd_text else 'N/A'}
 """
 
     result = await llm_chat(
@@ -122,6 +158,11 @@ Resume (if available):
     except json.JSONDecodeError:
         data = {}
 
+    match_score = data.get("matchScore") if jd_text else None
+    match_breakdown = (
+        json.dumps(data.get("matchBreakdown", []), ensure_ascii=False) if jd_text else "[]"
+    )
+
     report = Report(
         interview_id=interview.id,
         total_score=data.get("totalScore", 0),
@@ -130,6 +171,8 @@ Resume (if available):
         per_question_reviews=json.dumps(data.get("perQuestionReviews", []), ensure_ascii=False),
         resume_review=json.dumps(data.get("resumeReview", {}), ensure_ascii=False),
         job_fit=data.get("jobFit", ""),
+        match_score=match_score,
+        match_breakdown=match_breakdown,
     )
     session.add(report)
 
@@ -146,10 +189,12 @@ async def _retrieve_knowledge(session: Session, position: str, difficulty: str) 
     query_text = f"{position} {difficulty} 面试题"
     try:
         embedding = await get_embedding(query_text)
-        where = {}
+        # 先尝试按 position 过滤，没结果则全库搜索
+        results = []
         if position:
-            where["position"] = position
-        results = search(embedding, top_k=5, where=where if where else None)
+            results = search(embedding, top_k=5, where={"position": position})
+        if not results:
+            results = search(embedding, top_k=5)
         return "\n---\n".join([r["content"] for r in results])
     except Exception as e:
         print(f"[RAG] retrieval failed: {e}")
@@ -162,6 +207,7 @@ def _build_system_prompt(
     style: str,
     knowledge: str = "",
     resume_text: str = "",
+    jd_text: str = "",
     lang: str = "en",
 ) -> str:
     if lang == "zh":
@@ -173,6 +219,7 @@ def _build_system_prompt(
 3. 追问要深入细节，考察真实理解
 4. 如有简历信息，可针对性提问项目经历
 5. 覆盖该岗位的核心知识点，包括基础概念、项目经验、系统设计等
+6. 如有岗位 JD，需针对 JD 中明确列出的技术栈、能力要求、职责进行提问与追问，考察候选人对该具体岗位的匹配度
 
 输出格式（严格JSON）：
 {{"action": "ask|followup|next_question|end", "content": "你的提问内容", "reasoning": "内部判断"}}
@@ -192,6 +239,7 @@ Rules:
 3. Follow-ups should probe details to test real understanding
 4. If resume info is available, ask targeted questions about project experience
 5. Cover core knowledge areas: fundamentals, project experience, system design, etc.
+6. If a job description (JD) is provided, ask and follow up on the specific tech stack, capabilities and responsibilities explicitly listed in the JD, to assess the candidate's fit for this particular role.
 
 Output format (strict JSON):
 {{"action": "ask|followup|next_question|end", "content": "your question", "reasoning": "internal judgment"}}
@@ -202,6 +250,8 @@ Action meanings:
 - next_question: switch to a new question
 - end: interview ended
 """
+    if jd_text:
+        prompt += f"\n目标岗位 JD（据此针对性提问与追问）：\n{jd_text}\n"
     if knowledge:
         prompt += f"\n参考知识素材（可据此出题和判卷）：\n{knowledge}\n"
     if resume_text:

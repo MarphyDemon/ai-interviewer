@@ -20,9 +20,12 @@ def get_or_create_user(session, anonymous_uuid: str) -> int:
 
 def get_active_llm_config(session):
     from server.models import LLMConfig
+    from server.services.crypto_service import decrypt
 
     cfg = session.query(LLMConfig).filter(LLMConfig.is_active == True).first()
     if cfg:
+        # 返回解密后的 key，不影响数据库存储
+        cfg.api_key = decrypt(cfg.api_key)
         return cfg
 
     from server.config import settings

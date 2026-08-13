@@ -60,6 +60,40 @@ export class LottieAvatarProvider implements AvatarProvider {
 
   async interrupt(): Promise<void> {
     this.ttsProvider.cancel()
+    if (this.container) {
+      const avatarEl = this.container.querySelector('.lottie-avatar')
+      if (avatarEl) {
+        avatarEl.classList.remove('speaking')
+      }
+    }
+  }
+
+  /** 流式追加播报：走 TTS 队列（不 cancel），边生成边讲 */
+  startSpeakStream(): void {
+    // 开始新轮次前清掉上一轮残留
+    this.ttsProvider.cancel()
+  }
+
+  speakChunk(text: string): void {
+    if (!this.container || !text.trim()) return
+    const avatarEl = this.container.querySelector('.lottie-avatar')
+    avatarEl?.classList.add('speaking')
+    this.ttsProvider.speakQueued?.(text)
+    // 队列播完后移除 speaking 动画（Web Speech 专有判断）
+    const checkEnd = () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window && !window.speechSynthesis.speaking) {
+        avatarEl?.classList.remove('speaking')
+      } else {
+        window.setTimeout(checkEnd, 300)
+      }
+    }
+    window.setTimeout(checkEnd, 300)
+  }
+
+  endSpeakStream(text: string): void {
+    if (text.trim()) {
+      this.speakChunk(text)
+    }
   }
 
   idle(): void {

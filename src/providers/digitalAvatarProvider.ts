@@ -82,6 +82,34 @@ export class DigitalAvatarProvider implements AvatarProvider {
     await this.agent.speakByE2E(text)
   }
 
+  /** 流式追加播报：按 SDK 协议发送 is_start/is_end 分帧，边生成边讲 */
+  private speakStreamStarted = false
+
+  startSpeakStream(): void {
+    this.speakStreamStarted = false
+  }
+
+  speakChunk(text: string): void {
+    if (!this.agent || !text.trim()) return
+    const isStart = !this.speakStreamStarted
+    this.speakStreamStarted = true
+    // 镜像 speakByE2E 内部 sendControl，但用自定义 is_start/is_end 分帧
+    ;(this.agent as any).sendControl({
+      type: 'speak',
+      message: { text, is_start: isStart, is_end: false },
+    })
+  }
+
+  endSpeakStream(text: string): void {
+    if (!this.agent) return
+    const isStart = !this.speakStreamStarted
+    ;(this.agent as any).sendControl({
+      type: 'speak',
+      message: { text: text || '', is_start: isStart, is_end: true },
+    })
+    this.speakStreamStarted = false
+  }
+
   async startASR(onResult: ASRCallback): Promise<void> {
     if (!this.agent) throw new Error('Avatar not initialized')
     this.asrCallback = onResult
@@ -95,6 +123,7 @@ export class DigitalAvatarProvider implements AvatarProvider {
   }
 
   async interrupt(): Promise<void> {
+    this.speakStreamStarted = false
     if (!this.agent) return
     await this.agent.interruptConversation()
   }

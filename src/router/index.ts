@@ -17,6 +17,12 @@ const router = createRouter({
       path: '/interview',
       name: 'interview',
       component: () => import('@/views/InterviewView.vue'),
+      meta: { bare: true },
+    },
+    {
+      path: '/chat',
+      name: 'chat',
+      component: () => import('@/views/ChatView.vue'),
     },
     {
       path: '/report/:id',

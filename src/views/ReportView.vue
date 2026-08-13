@@ -2,9 +2,8 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getReport } from '@/api/report'
-import LangToggle from '@/components/common/LangToggle.vue'
-import type { ReportData } from '@/types'
+import { getReport, downloadReportPdf } from '@/api/report'
+import type { ReportData, MatchBreakdownItem } from '@/types'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -17,6 +16,7 @@ const errorMsg = ref('')
 onMounted(async () => {
   try {
     report.value = await getReport(Number(props.id))
+    refreshMatch()
   } catch (e: any) {
     errorMsg.value = e.message
   } finally {
@@ -24,26 +24,45 @@ onMounted(async () => {
   }
 })
 
-function exportPDF() {
-  window.print()
+const exporting = ref(false)
+
+async function exportPDF() {
+  exporting.value = true
+  try {
+    await downloadReportPdf(Number(props.id))
+  } catch (e: any) {
+    errorMsg.value = e.message || 'PDF 导出失败'
+  } finally {
+    exporting.value = false
+  }
+}
+
+const hasMatch = ref(false)
+function refreshMatch() {
+  hasMatch.value = !!report.value && !!report.value.matchBreakdown && report.value.matchBreakdown.length > 0
+}
+
+function statusMeta(status: MatchBreakdownItem['status']) {
+  switch (status) {
+    case 'met':
+      return { label: '满足', cls: 'bg-green-100 text-green-700' }
+    case 'partial':
+      return { label: '部分', cls: 'bg-amber-100 text-amber-700' }
+    case 'gap':
+      return { label: '不足', cls: 'bg-red-100 text-red-700' }
+    default:
+      return { label: status, cls: 'bg-gray-100 text-gray-600' }
+  }
 }
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <div class="mx-auto max-w-3xl px-4 py-8">
-      <div class="mb-6 flex items-center justify-between">
-        <button @click="router.push('/')" class="text-sm text-gray-500 hover:text-gray-700">
-          ← {{ t('common.back') }}
-        </button>
-        <LangToggle />
-      </div>
-
+  <div class="mx-auto max-w-3xl px-4 py-10">
       <div v-if="loading" class="py-20 text-center text-gray-400">{{ t('common.loading') }}</div>
       <div v-else-if="errorMsg" class="py-20 text-center text-red-500">{{ errorMsg }}</div>
 
       <div v-else-if="report" class="space-y-6">
-        <div class="rounded-lg bg-white p-6 shadow-sm">
+        <div class="card">
           <h1 class="mb-4 text-2xl font-bold text-gray-800">{{ t('report.title') }}</h1>
           <div class="mb-6 flex items-center justify-around">
             <div class="text-center">
@@ -75,6 +94,38 @@ function exportPDF() {
             <p class="text-sm leading-relaxed text-gray-600">{{ report.summary }}</p>
           </div>
 
+          <div v-if="hasMatch" class="mb-6">
+            <div class="mb-3 flex items-center justify-between">
+              <h3 class="font-semibold text-gray-700">人岗匹配</h3>
+              <div class="text-right">
+                <span class="text-xs text-gray-400">匹配度</span>
+                <p class="text-3xl font-bold text-gradient">{{ report.matchScore ?? '-' }}</p>
+              </div>
+            </div>
+            <div class="overflow-hidden rounded-xl border border-primary-100">
+              <table class="w-full text-sm">
+                <thead class="bg-primary-50/60 text-xs text-gray-500">
+                  <tr>
+                    <th class="px-3 py-2 text-left font-medium">JD 要求</th>
+                    <th class="px-3 py-2 text-left font-medium">状态</th>
+                    <th class="px-3 py-2 text-left font-medium">依据</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <tr v-for="(item, idx) in report.matchBreakdown" :key="idx" class="align-top">
+                    <td class="px-3 py-2 text-gray-700">{{ item.requirement }}</td>
+                    <td class="px-3 py-2">
+                      <span :class="['inline-block rounded-full px-2 py-0.5 text-xs font-medium', statusMeta(item.status).cls]">
+                        {{ statusMeta(item.status).label }}
+                      </span>
+                    </td>
+                    <td class="px-3 py-2 text-gray-500">{{ item.evidence }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div v-if="report.jobFit" class="mb-6">
             <h3 class="mb-2 font-semibold text-gray-700">{{ t('report.jobFit') }}</h3>
             <p class="text-sm leading-relaxed text-gray-600">{{ report.jobFit }}</p>
@@ -95,7 +146,7 @@ function exportPDF() {
           </div>
         </div>
 
-        <div class="rounded-lg bg-white p-6 shadow-sm">
+        <div class="card">
           <h2 class="mb-4 text-xl font-semibold text-gray-800">{{ t('report.perQuestion') }}</h2>
           <div class="space-y-4">
             <div
@@ -115,18 +166,18 @@ function exportPDF() {
         <div class="flex gap-4">
           <button
             @click="exportPDF"
-            class="rounded-lg bg-primary-600 px-6 py-2 text-white font-medium hover:bg-primary-700"
+            :disabled="exporting"
+            class="btn-primary !py-2"
           >
-            {{ t('report.exportPdf') }}
+            {{ exporting ? t('common.loading') : t('report.exportPdf') }}
           </button>
           <button
             @click="router.push('/history')"
-            class="rounded-lg border border-gray-300 px-6 py-2 text-gray-700 font-medium hover:bg-gray-100"
+            class="btn-ghost !py-2"
           >
             {{ t('report.viewHistory') }}
           </button>
         </div>
       </div>
     </div>
-  </div>
 </template>

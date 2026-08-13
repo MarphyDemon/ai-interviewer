@@ -34,4 +34,14 @@ export class WebSpeechTtsProvider implements TTSProvider {
     }
     this.utterance = null
   }
+
+  /** 流式追加：不 cancel，直接入队（Web Speech API 原生排队） */
+  speakQueued(text: string): void {
+    if (!this.isAvailable() || !text.trim()) return
+    const u = new SpeechSynthesisUtterance(text)
+    u.lang = 'zh-CN'
+    u.rate = 1.0
+    u.pitch = 1.0
+    window.speechSynthesis.speak(u)
+  }
 }

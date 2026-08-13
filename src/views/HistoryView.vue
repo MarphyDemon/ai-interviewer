@@ -7,7 +7,6 @@ import {
   deleteInterview,
   batchDeleteInterviews,
 } from '@/api/interview'
-import LangToggle from '@/components/common/LangToggle.vue'
 import type { InterviewRecord } from '@/types'
 
 const { t } = useI18n()
@@ -81,17 +80,9 @@ async function handleBatchDelete() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-50">
-    <div class="mx-auto max-w-3xl px-4 py-8">
+  <div class="mx-auto max-w-3xl px-4 py-10">
       <div class="mb-6 flex items-center justify-between">
-        <button @click="router.push('/')" class="text-sm text-gray-500 hover:text-gray-700">
-          ← {{ t('common.back') }}
-        </button>
-        <LangToggle />
-      </div>
-
-      <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-gray-800">{{ t('history.title') }}</h1>
+        <h1 class="text-2xl font-bold text-gray-900">{{ t('history.title') }}</h1>
         <button
           v-if="selectedIds.size > 0"
           @click="handleBatchDelete"
@@ -170,5 +161,4 @@ async function handleBatchDelete() {
         </div>
       </div>
     </div>
-  </div>
 </template>

@@ -8,6 +8,7 @@ export interface InterviewConfig {
   duration: number
   style?: InterviewerStyle
   resumeId?: number
+  jdId?: number
   lang?: 'en' | 'zh'
 }
 
@@ -72,6 +73,15 @@ export interface ResumeInfo {
   createdAt: string
 }
 
+export interface JobDescription {
+  id: number
+  title: string
+  content: string
+  position: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface InterviewRecord {
   id: number
   position: string
@@ -96,6 +106,12 @@ export interface QuestionReview {
   score: number
 }
 
+export interface MatchBreakdownItem {
+  requirement: string
+  status: 'met' | 'partial' | 'gap'
+  evidence: string
+}
+
 export interface ReportData {
   id: number
   interviewId: number
@@ -110,6 +126,8 @@ export interface ReportData {
     weaknesses: string[]
   }
   jobFit?: string
+  matchScore?: number | null
+  matchBreakdown?: MatchBreakdownItem[]
   createdAt: string
 }
 
@@ -125,4 +143,18 @@ export interface LLMConfig {
 export interface ASRResult {
   text: string
   isFinal: boolean
+}
+
+export interface ChatConversation {
+  id: number
+  title: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatMessageItem {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
 }

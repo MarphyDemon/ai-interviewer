@@ -10,6 +10,7 @@ from server.services.interview_service import (
     save_message,
 )
 from server.services.common import get_or_create_user
+from server.models import JobDescription
 
 router = APIRouter(prefix="/api/interview", tags=["interview"])
 
@@ -20,6 +21,7 @@ class StartRequest(BaseModel):
     duration: int = 30
     style: str = "friendly"
     resumeId: int | None = None
+    jdId: int | None = None
     lang: str = "en"
 
 
@@ -34,6 +36,7 @@ async def start_interview(req: StartRequest, session: Session = Depends(get_sess
     interview = Interview(
         user_id=user_id,
         resume_id=req.resumeId,
+        jd_id=req.jdId,
         position=req.position,
         difficulty=req.difficulty,
         duration=req.duration,
@@ -44,8 +47,9 @@ async def start_interview(req: StartRequest, session: Session = Depends(get_sess
     session.refresh(interview)
 
     resume = session.get(Resume, req.resumeId) if req.resumeId else None
+    jd = session.get(JobDescription, req.jdId) if req.jdId else None
 
-    first = await generate_first_question(session, interview, resume, lang=req.lang)
+    first = await generate_first_question(session, interview, resume, jd=jd, lang=req.lang)
 
     save_message(
         session, interview.id, "interviewer", first.get("content", ""),

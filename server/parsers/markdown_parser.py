@@ -54,7 +54,19 @@ def _split_long_text(text: str, max_size: int) -> List[str]:
     current = ""
 
     for para in paragraphs:
-        if len(current) + len(para) + 2 > max_size and current:
+        # 单个段落超长，按行拆分
+        if len(para) > max_size:
+            if current.strip():
+                chunks.append(current.strip())
+                current = ""
+            lines = para.split("\n")
+            for line in lines:
+                if len(current) + len(line) + 1 > max_size and current:
+                    chunks.append(current.strip())
+                    current = line
+                else:
+                    current = current + "\n" + line if current else line
+        elif len(current) + len(para) + 2 > max_size and current:
             chunks.append(current.strip())
             current = para
         else:
