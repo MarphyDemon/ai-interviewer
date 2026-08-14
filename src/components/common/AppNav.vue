@@ -18,6 +18,8 @@ const links = computed(() => [
   { name: 'admin', to: '/admin', label: t('nav.admin') },
 ])
 
+const mobileLinks = computed(() => links.value.filter(l => l.name !== 'code'))
+
 function isActive(to: string) {
   if (to === '/') return route.path === '/'
   return route.path.startsWith(to)
@@ -76,10 +78,10 @@ function logout() {
       </div>
     </div>
 
-    <!-- 移动端导航 -->
+    <!-- 移动端导航（不包含代码练习） -->
     <nav class="flex items-center gap-1 overflow-x-auto border-t border-primary-100/60 px-4 py-2 md:hidden">
       <router-link
-        v-for="link in links"
+        v-for="link in mobileLinks"
         :key="link.name"
         :to="link.to"
         class="whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition"

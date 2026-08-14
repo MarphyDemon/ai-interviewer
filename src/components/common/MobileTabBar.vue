@@ -8,6 +8,7 @@ const userStore = useUserStore()
 
 const tabs = [
   { path: '/', label: '首页', icon: '🏠' },
+  { path: '/chat', label: '聊天', icon: '🤖' },
   { path: '/setup', label: '面试', icon: '💬' },
   { path: '/history', label: '历史', icon: '📋' },
   { path: userStore.isLoggedIn ? '/admin' : '/login', label: userStore.isLoggedIn ? '我的' : '登录', icon: '👤' },

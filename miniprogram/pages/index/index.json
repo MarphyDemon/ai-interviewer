@@ -1,5 +1,6 @@
-Page({
-  data: {
-    webViewUrl: ''
-  }
-})
+{
+  "navigationBarTitleText": "AI面试官",
+  "navigationBarBackgroundColor": "#1a1a2e",
+  "navigationBarTextStyle": "white",
+  "usingComponents": {}
+}
