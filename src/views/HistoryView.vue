@@ -136,7 +136,15 @@ async function handleBatchDelete() {
                   <span v-if="record.endedAt"> → {{ record.endedAt }}</span>
                 </p>
               </div>
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-2">
+                <!-- 回放入口 -->
+                <button
+                  @click.stop="router.push(`/interview/${record.id}/playback`)"
+                  class="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                >
+                  <svg viewBox="0 0 24 24" class="mr-1 inline h-3.5 w-3.5" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  回放
+                </button>
                 <span class="text-sm text-gray-500">{{ record.duration }} {{ t('history.minutes') }}</span>
                 <span
                   :class="[

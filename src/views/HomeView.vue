@@ -1,9 +1,36 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useUserStore } from '@/stores/user'
+import { getAvatarList, setPreferredAvatar, type AvatarItem } from '@/api/avatar'
 
 const { t } = useI18n()
 const router = useRouter()
+const userStore = useUserStore()
+
+const avatars = ref<AvatarItem[]>([])
+
+onMounted(async () => {
+  if (userStore.isLoggedIn) {
+    try {
+      avatars.value = await getAvatarList()
+    } catch {
+      // 忽略加载失败
+    }
+  }
+})
+
+async function selectAvatar(id: number) {
+  try {
+    await setPreferredAvatar(id)
+    if (userStore.user) {
+      userStore.user.preferredAvatarId = id
+    }
+  } catch (e: any) {
+    alert(e.message)
+  }
+}
 
 const features = [
   { icon: 'interview', titleKey: 'home.feature1Title', descKey: 'home.feature1Desc' },
@@ -97,6 +124,27 @@ function go(path: string) {
           <h3 class="text-lg font-semibold text-gray-800">{{ t(f.titleKey) }}</h3>
           <p class="mt-2 text-sm leading-relaxed text-gray-500">{{ t(f.descKey) }}</p>
         </div>
+      </div>
+    </section>
+
+    <!-- 形象选择（仅登录用户可见） -->
+    <section v-if="userStore.isLoggedIn && avatars.length" class="mx-auto max-w-5xl px-4 pb-24">
+      <div class="mb-6 text-center">
+        <h2 class="text-2xl font-bold text-gray-900">选择你的面试官形象</h2>
+        <p class="mt-2 text-gray-500">从下方挑选一个数字人形象，将用于陪练与面试</p>
+      </div>
+      <div class="flex flex-wrap justify-center gap-4">
+        <button
+          v-for="a in avatars"
+          :key="a.id"
+          class="card flex w-40 flex-col items-center gap-3 !p-5 transition hover:-translate-y-1 hover:shadow-glow"
+          :class="{ 'ring-2 ring-primary-400': userStore.user?.preferredAvatarId === a.id }"
+          @click="selectAvatar(a.id)"
+        >
+          <span class="text-5xl">{{ a.extra?.emoji || '🙂' }}</span>
+          <span class="text-sm font-medium text-gray-700">{{ a.name }}</span>
+          <span v-if="userStore.user?.preferredAvatarId === a.id" class="text-xs text-primary-600">已选择</span>
+        </button>
       </div>
     </section>
 

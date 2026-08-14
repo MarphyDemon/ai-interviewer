@@ -203,3 +203,119 @@ def generate_report_pdf(report_data: dict) -> bytes:
 
     doc.build(story)
     return buf.getvalue()
+
+
+def generate_resume_report_pdf(report: dict) -> bytes:
+    """生成简历深度评估报告 PDF"""
+    _ensure_font()
+    font_name = _get_font_name()
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        rightMargin=20 * mm,
+        leftMargin=20 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "ResumeTitle", parent=styles["Title"], fontName=font_name,
+        fontSize=22, alignment=TA_CENTER, spaceAfter=12,
+    )
+    heading_style = ParagraphStyle(
+        "ResumeHeading", parent=styles["Heading2"], fontName=font_name,
+        fontSize=14, spaceBefore=14, spaceAfter=8,
+        textColor=colors.HexColor("#1a56db"),
+    )
+    body_style = ParagraphStyle(
+        "ResumeBody", parent=styles["BodyText"], fontName=font_name,
+        fontSize=10, leading=16, spaceAfter=6,
+    )
+    small_style = ParagraphStyle(
+        "ResumeSmall", parent=styles["BodyText"], fontName=font_name,
+        fontSize=9, leading=13, textColor=colors.HexColor("#666666"),
+    )
+    grade_style = ParagraphStyle(
+        "Grade", fontName=font_name, fontSize=48,
+        alignment=TA_CENTER, textColor=colors.HexColor("#1a56db"), spaceAfter=6,
+    )
+    label_style = ParagraphStyle(
+        "GradeLabel", fontName=font_name, fontSize=12,
+        alignment=TA_CENTER, textColor=colors.HexColor("#9ca3af"), spaceAfter=20,
+    )
+
+    story = []
+    data = report.get("data", {}) or {}
+
+    # 标题
+    story.append(Paragraph("简历深度评估报告", title_style))
+    position = report.get("position", "")
+    if position:
+        story.append(Paragraph(f"目标岗位：{position}", label_style))
+    story.append(Spacer(1, 6))
+
+    # 综合评级
+    grade = data.get("grade", "B")
+    story.append(Paragraph(str(grade), grade_style))
+    story.append(Paragraph("综合评级（S/A/B/C/D）", label_style))
+
+    # 评分维度表
+    score_rows = [
+        ["维度", "评分"],
+        ["结构完整度", str(data.get("structureScore", 0))],
+        ["岗位匹配度", f"{data.get('positionMatch', 0)}%"],
+        ["技能覆盖度", str(data.get("skillCoverage", 0))],
+        ["项目深度", str(data.get("projectDepth", 0))],
+    ]
+    story.append(Paragraph("评分维度", heading_style))
+    table = Table(score_rows, colWidths=[80 * mm, 40 * mm])
+    table.setStyle(
+        TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), font_name),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a56db")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ALIGN", (1, 0), (1, -1), "CENTER"),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e5e7eb")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f9fafb")]),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ])
+    )
+    story.append(table)
+    story.append(Spacer(1, 10))
+
+    # 亮点
+    highlights = data.get("highlights", []) or []
+    if highlights:
+        story.append(Paragraph("亮点", heading_style))
+        for h in highlights:
+            story.append(Paragraph(f"• {h}", body_style))
+
+    # 不足
+    weaknesses = data.get("weaknesses", []) or []
+    if weaknesses:
+        story.append(Paragraph("不足", heading_style))
+        for w in weaknesses:
+            story.append(Paragraph(f"• {w}", body_style))
+
+    # 改进建议
+    improvements = data.get("improvements", []) or []
+    if improvements:
+        story.append(Paragraph("改进建议", heading_style))
+        for imp in improvements:
+            section = imp.get("section", "") if isinstance(imp, dict) else ""
+            suggestion = imp.get("suggestion", "") if isinstance(imp, dict) else str(imp)
+            story.append(Paragraph(f"<b>{section}</b>：{suggestion}", body_style))
+
+    # 可投递岗位
+    recommended = data.get("recommendedPositions", []) or []
+    if recommended:
+        story.append(Paragraph("可投递岗位建议", heading_style))
+        story.append(Paragraph("、".join(recommended), body_style))
+
+    doc.build(story)
+    return buf.getvalue()

@@ -18,6 +18,9 @@ data/
 server/data/
 server/chroma_db/
 
+# Monaco Editor 本地静态资源（从 node_modules 复制生成）
+public/vs/
+
 # IDE
 .idea/
 .vscode/
@@ -27,6 +30,14 @@ server/chroma_db/
 # OS
 .DS_Store
 Thumbs.db
+
+# PostgreSQL (local install)
+pg.zip
+pg/
+py_deps/
+
+# Stray files
+nul
 
 # Logs
 *.log

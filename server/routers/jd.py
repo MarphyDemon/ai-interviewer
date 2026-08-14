@@ -5,24 +5,35 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlmodel import Session, select
 from server.database import get_session
-from server.models import JobDescription
+from server.models import JobDescription, User
 from server.services.jd_service import parse_jd_file
-from server.services.common import get_or_create_user
+from server.services.auth_service import get_current_user
 from server.config import settings
 
 router = APIRouter(prefix="/api/jd", tags=["jd"])
 
 
 @router.get("")
-async def list_jds(session: Session = Depends(get_session)):
-    jds = session.exec(select(JobDescription).order_by(JobDescription.created_at.desc())).all()
+async def list_jds(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    jds = session.exec(
+        select(JobDescription)
+        .where(JobDescription.user_id == user.id)
+        .order_by(JobDescription.created_at.desc())
+    ).all()
     return [_format_jd(j) for j in jds]
 
 
 @router.get("/{jd_id}")
-async def get_jd(jd_id: int, session: Session = Depends(get_session)):
+async def get_jd(
+    jd_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     jd = session.get(JobDescription, jd_id)
-    if not jd:
+    if not jd or jd.user_id != user.id:
         raise HTTPException(404, "Job description not found")
     return _format_jd(jd)
 
@@ -33,10 +44,10 @@ async def create_jd(
     content: str = Form(...),
     position: str = Form(""),
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    user_id = get_or_create_user(session, "default")
     jd = JobDescription(
-        user_id=user_id,
+        user_id=user.id,
         title=title.strip() or "未命名 JD",
         content=content,
         position=position,
@@ -53,9 +64,8 @@ async def upload_jd(
     title: str = Form(""),
     position: str = Form(""),
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    user_id = get_or_create_user(session, "default")
-
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in (".pdf", ".docx", ".md", ".markdown", ".txt"):
         raise HTTPException(400, "Only PDF, DOCX, Markdown and TXT are supported")
@@ -75,7 +85,7 @@ async def upload_jd(
         raise HTTPException(400, "无法从文件中提取文本，请检查文件内容")
 
     jd = JobDescription(
-        user_id=user_id,
+        user_id=user.id,
         title=title.strip() or os.path.splitext(file.filename)[0] or "未命名 JD",
         content=parsed_text,
         position=position,
@@ -93,9 +103,10 @@ async def update_jd(
     content: str = Form(None),
     position: str = Form(None),
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
     jd = session.get(JobDescription, jd_id)
-    if not jd:
+    if not jd or jd.user_id != user.id:
         raise HTTPException(404, "Job description not found")
     if title is not None:
         jd.title = title.strip() or jd.title
@@ -111,9 +122,13 @@ async def update_jd(
 
 
 @router.delete("/{jd_id}")
-async def delete_jd(jd_id: int, session: Session = Depends(get_session)):
+async def delete_jd(
+    jd_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
     jd = session.get(JobDescription, jd_id)
-    if not jd:
+    if not jd or jd.user_id != user.id:
         raise HTTPException(404, "Job description not found")
     session.delete(jd)
     session.commit()

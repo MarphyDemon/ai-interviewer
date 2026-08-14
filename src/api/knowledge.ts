@@ -13,6 +13,10 @@ export function getKnowledgeList(): Promise<KnowledgeDoc[]> {
   return client.get('/knowledge')
 }
 
+export function getPositions(): Promise<{ positions: string[] }> {
+  return client.get('/knowledge/positions')
+}
+
 export function getKnowledgeStatus(id: number): Promise<{ status: string }> {
   return client.get(`/knowledge/${id}/status`)
 }

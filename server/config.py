@@ -22,7 +22,19 @@ class Settings(BaseSettings):
 
     admin_password: str = "admin123"
 
+    # 数据库：默认 SQLite，设置 DATABASE_URL 环境变量可切换 PostgreSQL
+    # e.g. postgresql://user:password@localhost:5432/ai_interviewer
     database_url: str = f"sqlite:///{PROJECT_ROOT / 'data' / 'app.db'}"
+
+    # S3 兼容对象存储（可选，不设置则使用本地文件存储）
+    s3_endpoint: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = "ai-interviewer"
+    s3_region: str = "auto"
+
+    # 录制文件存储目录（本地模式）
+    recordings_dir: Path = PROJECT_ROOT / "data" / "recordings"
 
     data_dir: Path = PROJECT_ROOT / "data"
     chroma_dir: Path = PROJECT_ROOT / "data" / "chroma_db"
@@ -41,4 +53,5 @@ DATA_DIR = settings.data_dir
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 (DATA_DIR / "resumes").mkdir(parents=True, exist_ok=True)
 (DATA_DIR / "knowledge").mkdir(parents=True, exist_ok=True)
+settings.recordings_dir.mkdir(parents=True, exist_ok=True)
 settings.chroma_dir.mkdir(parents=True, exist_ok=True)
