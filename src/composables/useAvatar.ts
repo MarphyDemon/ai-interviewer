@@ -4,6 +4,8 @@ import { DigitalAvatarProvider } from '@/providers/digitalAvatarProvider'
 import { LottieAvatarProvider } from '@/providers/lottieAvatarProvider'
 import { WebSpeechTtsProvider } from '@/providers/webSpeechTtsProvider'
 import { WebSpeechAsrProvider } from '@/providers/webSpeechAsrProvider'
+import { detectHost } from '@/utils/bridge'
+import { useDevice } from '@/composables/useDevice'
 
 const avatarProvider = ref<AvatarProvider | null>(null)
 const isDigital = ref(false)
@@ -23,9 +25,20 @@ function supportsWebCodecs(): boolean {
 
 export function useAvatar() {
   async function initAvatar(containerId: string): Promise<AvatarProvider> {
-    const useDigital = supportsWebGL2() && supportsWebCodecs()
+    const host = detectHost()
+    const { isMobile } = useDevice()
 
-    if (useDigital) {
+    // Mini program: force Lottie (WebGL not supported)
+    if (host === 'miniprogram') {
+      return createLottieProvider(containerId)
+    }
+
+    // Mobile: try WebGL first, fallback to Lottie
+    // Desktop: try WebGL + WebCodecs, fallback to Lottie
+    const webglOk = supportsWebGL2()
+    const webCodecsOk = supportsWebCodecs()
+
+    if (webglOk && (isMobile.value || webCodecsOk)) {
       try {
         const provider = new DigitalAvatarProvider()
         await provider.init(containerId)
@@ -37,10 +50,14 @@ export function useAvatar() {
       }
     }
 
+    return createLottieProvider(containerId)
+  }
+
+  function createLottieProvider(containerId: string): AvatarProvider {
     const tts = new WebSpeechTtsProvider()
     const asr = new WebSpeechAsrProvider()
     const provider = new LottieAvatarProvider(tts, asr)
-    await provider.init(containerId)
+    provider.init(containerId)
     avatarProvider.value = provider
     isDigital.value = false
     return provider

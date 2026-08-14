@@ -1,0 +1,9 @@
+<view class="container">
+  <web-view
+    id="webView"
+    src="{{webViewUrl}}"
+    bindmessage="onMessage"
+    bindload="onWebViewLoad"
+    binderror="onWebViewError"
+  ></web-view>
+</view>
