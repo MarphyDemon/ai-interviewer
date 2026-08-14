@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   InterviewConfig,
   AIResponse,
+  InterviewProblem,
 } from '@/types'
 import * as interviewApi from '@/api/interview'
 
@@ -17,6 +18,8 @@ export const useInterviewStore = defineStore('interview', () => {
   const currentFollowupLevel = ref(0)
   const errorMsg = ref('')
   const startTime = ref<number | null>(null)
+  const currentProblem = ref<InterviewProblem | null>(null)
+  const lastJudgeResult = ref<any>(null)
 
   const isRunning = computed(
     () =>
@@ -52,6 +55,8 @@ export const useInterviewStore = defineStore('interview', () => {
     currentFollowupLevel.value = 0
     errorMsg.value = ''
     startTime.value = null
+    currentProblem.value = null
+    lastJudgeResult.value = null
   }
 
   async function start(cfg: InterviewConfig) {
@@ -64,7 +69,6 @@ export const useInterviewStore = defineStore('interview', () => {
       interviewId.value = res.interviewId
       startTime.value = Date.now()
       addMessage('interviewer', res.firstQuestion.content)
-      state.value = 'waiting_answer'
       handleAIResponse(res.firstQuestion)
     } catch (e: any) {
       state.value = 'error'
@@ -76,10 +80,34 @@ export const useInterviewStore = defineStore('interview', () => {
     if (!interviewId.value) return
     addMessage('user', answer)
     state.value = 'analyzing'
+    currentProblem.value = null
     try {
       const res = await interviewApi.submitAnswer(interviewId.value, answer)
       addMessage('interviewer', res.content)
       handleAIResponse(res)
+    } catch (e: any) {
+      state.value = 'error'
+      errorMsg.value = e.message
+    }
+  }
+
+  async function submitCode(problemId: number, language: string, code: string) {
+    if (!interviewId.value) return
+    state.value = 'analyzing'
+    currentProblem.value = null
+    try {
+      const res = await interviewApi.submitInterviewCode(interviewId.value, {
+        problemId,
+        language,
+        code,
+      })
+      lastJudgeResult.value = res.judgeResult
+      // 将判定结果摘要作为用户消息
+      const summary = `[算法题提交] ${res.judgeResult.status} (${res.judgeResult.passCount}/${res.judgeResult.totalCount})`
+      addMessage('user', summary)
+      // 下一题
+      addMessage('interviewer', res.nextQuestion.content)
+      handleAIResponse(res.nextQuestion)
     } catch (e: any) {
       state.value = 'error'
       errorMsg.value = e.message
@@ -93,13 +121,22 @@ export const useInterviewStore = defineStore('interview', () => {
         currentQuestionIndex.value++
         currentFollowupLevel.value = 0
         state.value = 'waiting_answer'
+        currentProblem.value = null
         break
       case 'followup':
         currentFollowupLevel.value++
         state.value = 'waiting_answer'
+        currentProblem.value = null
+        break
+      case 'algorithm':
+        currentQuestionIndex.value++
+        currentFollowupLevel.value = 0
+        currentProblem.value = res.problem || null
+        state.value = 'waiting_answer'
         break
       case 'end':
         state.value = 'generating_report'
+        currentProblem.value = null
         break
     }
   }
@@ -129,12 +166,15 @@ export const useInterviewStore = defineStore('interview', () => {
     currentFollowupLevel,
     errorMsg,
     startTime,
+    currentProblem,
+    lastJudgeResult,
     isRunning,
     remainingTime,
     addMessage,
     reset,
     start,
     submitAnswer,
+    submitCode,
     endInterview,
     setState,
   }

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from server.database import get_session
-from server.models import LLMConfig
+from server.models import LLMConfig, AvatarProviderConfig
 from server.config import settings
 from server.services.common import mask_api_key
 from server.services.crypto_service import encrypt, decrypt
@@ -148,5 +148,110 @@ async def activate_config(
     for c in configs:
         c.is_active = c.id == config_id
         session.add(c)
+    session.commit()
+    return {"ok": True}
+
+
+# ---------- 数字人服务凭证（AvatarProviderConfig，镜像 LLMConfig 模式）----------
+
+
+class AvatarConfigRequest(BaseModel):
+    name: str
+    appId: str
+    appSecret: str
+    gatewayServer: str
+
+
+class UpdateAvatarConfigRequest(BaseModel):
+    name: str | None = None
+    appId: str | None = None
+    appSecret: str | None = None
+    gatewayServer: str | None = None
+
+
+@router.get("/avatar-config")
+async def list_avatar_configs(
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_token),
+):
+    configs = session.exec(select(AvatarProviderConfig)).all()
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "appId": c.app_id,
+            "appSecretMasked": mask_api_key(decrypt(c.app_secret)),
+            "gatewayServer": c.gateway_server,
+            "isActive": c.is_active,
+        }
+        for c in configs
+    ]
+
+
+@router.post("/avatar-config")
+async def create_avatar_config(
+    req: AvatarConfigRequest,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_token),
+):
+    cfg = AvatarProviderConfig(
+        name=req.name,
+        app_id=req.appId,
+        app_secret=encrypt(req.appSecret),
+        gateway_server=req.gatewayServer,
+    )
+    session.add(cfg)
+    session.commit()
+    session.refresh(cfg)
+    return {"id": cfg.id, "name": cfg.name}
+
+
+@router.put("/avatar-config/{config_id}")
+async def update_avatar_config(
+    config_id: int,
+    req: UpdateAvatarConfigRequest,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_token),
+):
+    cfg = session.get(AvatarProviderConfig, config_id)
+    if not cfg:
+        raise HTTPException(404, "Config not found")
+    if req.name is not None:
+        cfg.name = req.name
+    if req.appId is not None:
+        cfg.app_id = req.appId
+    if req.appSecret is not None:
+        cfg.app_secret = encrypt(req.appSecret)
+    if req.gatewayServer is not None:
+        cfg.gateway_server = req.gatewayServer
+    session.add(cfg)
+    session.commit()
+    return {"ok": True}
+
+
+@router.post("/avatar-config/{config_id}/activate")
+async def activate_avatar_config(
+    config_id: int,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_token),
+):
+    configs = session.exec(select(AvatarProviderConfig)).all()
+    for c in configs:
+        c.is_active = c.id == config_id
+        session.add(c)
+    session.commit()
+    return {"ok": True}
+
+
+@router.delete("/avatar-config/{config_id}")
+async def delete_avatar_config(
+    config_id: int,
+    session: Session = Depends(get_session),
+    _: str = Depends(verify_token),
+):
+    cfg = session.get(AvatarProviderConfig, config_id)
+    if not cfg:
+        raise HTTPException(404, "Config not found")
+    session.delete(cfg)
     session.commit()
     return {"ok": True}

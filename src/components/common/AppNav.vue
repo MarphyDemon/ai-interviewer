@@ -3,14 +3,17 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LangToggle from './LangToggle.vue'
+import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
 
 const links = computed(() => [
   { name: 'home', to: '/', label: t('nav.home') },
   { name: 'chat', to: '/chat', label: t('nav.chat') },
+  { name: 'code', to: '/code', label: t('nav.codePractice') },
   { name: 'history', to: '/history', label: t('nav.history') },
   { name: 'admin', to: '/admin', label: t('nav.admin') },
 ])
@@ -18,6 +21,11 @@ const links = computed(() => [
 function isActive(to: string) {
   if (to === '/') return route.path === '/'
   return route.path.startsWith(to)
+}
+
+function logout() {
+  userStore.logout()
+  router.push('/')
 }
 </script>
 
@@ -50,6 +58,14 @@ function isActive(to: string) {
       </nav>
 
       <div class="flex items-center gap-2">
+        <template v-if="userStore.isLoggedIn">
+          <span class="hidden text-sm text-gray-600 sm:inline">{{ userStore.user?.username }}</span>
+          <button class="btn-ghost !px-3 !py-2 text-sm" @click="logout">{{ t('nav.logout') }}</button>
+        </template>
+        <template v-else>
+          <button class="btn-ghost !px-3 !py-2 text-sm" @click="router.push('/login')">{{ t('nav.login') }}</button>
+          <button class="btn-ghost !px-3 !py-2 text-sm" @click="router.push('/register')">{{ t('nav.register') }}</button>
+        </template>
         <button
           class="btn-primary !px-4 !py-2 text-sm"
           @click="router.push('/setup')"

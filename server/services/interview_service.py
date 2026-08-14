@@ -1,8 +1,9 @@
 import json
+import random
 from datetime import datetime
 from typing import Optional
 from sqlmodel import Session, select
-from server.models import Interview, InterviewMessage, Report, Resume, KnowledgeDoc, JobDescription
+from server.models import Interview, InterviewMessage, Report, Resume, KnowledgeDoc, JobDescription, AlgorithmProblem
 from server.services.llm_service import llm_chat
 from server.services.rag_service import search
 from server.embedding.siliconflow import get_embedding
@@ -220,14 +221,16 @@ def _build_system_prompt(
 4. 如有简历信息，可针对性提问项目经历
 5. 覆盖该岗位的核心知识点，包括基础概念、项目经验、系统设计等
 6. 如有岗位 JD，需针对 JD 中明确列出的技术栈、能力要求、职责进行提问与追问，考察候选人对该具体岗位的匹配度
+7. 在面试中段（非首题非末题），可适当安排 1-2 道算法/编码题，考察 coding 能力。使用 action="algorithm"
 
 输出格式（严格JSON）：
-{{"action": "ask|followup|next_question|end", "content": "你的提问内容", "reasoning": "内部判断"}}
+{{"action": "ask|followup|next_question|algorithm|end", "content": "你的提问内容", "reasoning": "内部判断"}}
 
 action 说明：
 - ask: 首次提问
 - followup: 追问（同一题的深入）
 - next_question: 换新题
+- algorithm: 安排一道算法编码题（系统会自动选题，content 写引导语即可）
 - end: 面试结束
 """
     else:
@@ -240,14 +243,16 @@ Rules:
 4. If resume info is available, ask targeted questions about project experience
 5. Cover core knowledge areas: fundamentals, project experience, system design, etc.
 6. If a job description (JD) is provided, ask and follow up on the specific tech stack, capabilities and responsibilities explicitly listed in the JD, to assess the candidate's fit for this particular role.
+7. In the middle of the interview (not first or last question), you may assign 1-2 algorithm/coding questions to test coding ability. Use action="algorithm".
 
 Output format (strict JSON):
-{{"action": "ask|followup|next_question|end", "content": "your question", "reasoning": "internal judgment"}}
+{{"action": "ask|followup|next_question|algorithm|end", "content": "your question", "reasoning": "internal judgment"}}
 
 Action meanings:
 - ask: first question
 - followup: deeper follow-up on the same question
 - next_question: switch to a new question
+- algorithm: assign an algorithm/coding problem (system auto-selects, just write intro in content)
 - end: interview ended
 """
     if jd_text:
@@ -305,3 +310,33 @@ def save_message(
     )
     session.add(msg)
     session.commit()
+
+
+def pick_algorithm_problem(session: Session, difficulty: str = "") -> Optional[AlgorithmProblem]:
+    """根据难度选取一道算法题（随机，无则返回 None）。"""
+    stmt = select(AlgorithmProblem).where(AlgorithmProblem.is_public == True)  # noqa: E712
+    if difficulty:
+        # 尝试匹配难度（简单/中等/困难）
+        stmt = stmt.where(AlgorithmProblem.difficulty == difficulty)
+    rows = session.exec(stmt).all()
+    if not rows:
+        # 退而求其次，取全部
+        rows = session.exec(select(AlgorithmProblem).where(AlgorithmProblem.is_public == True)).all()  # noqa: E712
+    if not rows:
+        return None
+    return random.choice(rows)
+
+
+def format_problem_for_interview(problem: AlgorithmProblem) -> dict:
+    """将算法题格式化为面试前端可用的结构（不含隐藏测试用例）。"""
+    return {
+        "id": problem.id,
+        "title": problem.title,
+        "description": problem.description,
+        "difficulty": problem.difficulty,
+        "tags": json.loads(problem.tags) if problem.tags else [],
+        "examples": json.loads(problem.examples) if problem.examples else [],
+        "timeLimitMs": problem.time_limit_ms,
+        "memoryLimitMb": problem.memory_limit_mb,
+    }
+

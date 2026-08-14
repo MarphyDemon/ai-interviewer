@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import AsyncGenerator, Optional
 from openai import AsyncOpenAI
 from sqlmodel import Session
 from fastapi import HTTPException
@@ -42,3 +42,32 @@ async def llm_chat(
 
     resp = await client.chat.completions.create(**kwargs)
     return resp.choices[0].message.content or ""
+
+
+async def llm_chat_stream(
+    messages: list[dict],
+    session: Optional[Session] = None,
+) -> AsyncGenerator[str, None]:
+    """流式 LLM 对话，逐 chunk 产出文本。"""
+    if session:
+        client, model = get_llm_client(session)
+    else:
+        from server.config import settings
+
+        if not settings.llm_api_key or settings.llm_api_key.startswith("<"):
+            raise HTTPException(
+                500,
+                "LLM API Key 未配置。请在 server/.env 中填入 LLM_API_KEY，或在管理页配置 LLM 供应商。",
+            )
+        client = AsyncOpenAI(
+            base_url=settings.llm_base_url, api_key=settings.llm_api_key
+        )
+        model = settings.llm_model
+
+    stream = await client.chat.completions.create(
+        model=model, messages=messages, stream=True
+    )
+    async for chunk in stream:
+        delta = chunk.choices[0].delta.content or ""
+        if delta:
+            yield delta

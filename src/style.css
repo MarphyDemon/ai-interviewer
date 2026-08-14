@@ -34,6 +34,30 @@ body,
   }
 }
 
+/* 数字人全屏样式 */
+.avatar-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+  background: #0f0a1f;
+}
+.avatar-stage:fullscreen #chat-avatar-container {
+  width: 100%;
+  height: 100%;
+}
+.avatar-stage:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  border: none;
+  background: #0f0a1f;
+}
+.avatar-stage:-webkit-full-screen #chat-avatar-container {
+  width: 100%;
+  height: 100%;
+}
+
 /* Markdown 正文样式 */
 .markdown-body {
   line-height: 1.7;
@@ -145,4 +169,65 @@ body,
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #a5b4fc;
+}
+
+/* ========== Mobile Responsive Styles ========== */
+
+@media (max-width: 768px) {
+  html {
+    font-size: 14px;
+  }
+
+  body {
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: contain;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  [role='button'] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .safe-area-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .interview-fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+  }
+}
+
+/* Mobile safe area helper for Capacitor/notch devices */
+.safe-area-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 56px);
+}
+
+/* Miniprogram webview environment */
+.wx-env .container {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Disable hover on touch devices */
+@media (hover: none) {
+  .btn-primary:hover {
+    filter: none;
+    transform: none;
+  }
+  .btn-ghost:hover {
+    filter: none;
+  }
 }

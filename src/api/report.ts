@@ -20,3 +20,25 @@ export async function downloadReportPdf(interviewId: number): Promise<void> {
   document.body.removeChild(a)
   window.URL.revokeObjectURL(url)
 }
+
+export interface ShareStatus {
+  token: string | null
+  expiresAt: string | null
+  expired: boolean
+}
+
+export function getShareStatus(interviewId: number): Promise<ShareStatus> {
+  return client.get(`/report/${interviewId}/share-status`)
+}
+
+export function createShareLink(interviewId: number): Promise<{ token: string; expiresAt: string }> {
+  return client.post(`/report/${interviewId}/share`)
+}
+
+export function revokeShareLink(interviewId: number): Promise<{ ok: boolean }> {
+  return client.delete(`/report/${interviewId}/share`)
+}
+
+export function getSharedReport(token: string): Promise<ReportData> {
+  return client.get(`/share/${token}`)
+}

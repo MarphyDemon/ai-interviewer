@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, computed, nextTick } from 'vue'
+import { onMounted, onUnmounted, ref, computed, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { useInterviewStore } from '@/stores/interview'
 import { useAvatar } from '@/composables/useAvatar'
+import { useMediaRecorder } from '@/composables/useMediaRecorder'
 import { WebSpeechAsrProvider } from '@/providers/webSpeechAsrProvider'
+import { getLanguages, type LanguageItem } from '@/api/code'
+import { renderMarkdown } from '@/utils/markdown'
 import type { ASRResult } from '@/types'
 import type { AvatarProvider } from '@/providers/avatarProvider'
 
@@ -24,6 +28,117 @@ const initializing = ref(true)
 const avatarProvider = ref<AvatarProvider | null>(null)
 const fallbackAsr = ref<WebSpeechAsrProvider | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
+
+// 摄像头 PiP 小窗
+const cameraVideoRef = ref<HTMLVideoElement | null>(null)
+const cameraStream = ref<MediaStream | null>(null)
+const cameraEnabled = ref(false)
+const cameraCollapsed = ref(false)
+
+// 算法题代码编辑器
+const codeLang = ref('python')
+const codeValue = ref('')
+const codeLanguages = ref<LanguageItem[]>([])
+const codeSubmitting = ref(false)
+const codePanelCollapsed = ref(false)
+
+const monacoLangMap: Record<string, string> = {
+  python: 'python', javascript: 'javascript', typescript: 'typescript',
+  java: 'java', cpp: 'cpp', c: 'c', go: 'go', rust: 'rust',
+}
+
+// 加载语言列表
+;(async () => {
+  try {
+    codeLanguages.value = await getLanguages()
+    if (codeLanguages.value.length > 0) {
+      codeValue.value = codeLanguages.value[0].template
+    }
+  } catch { /* ignore */ }
+})()
+
+// 面试录制
+const useRecorder = () => {
+  const recorder = useMediaRecorder(
+    computed(() => store.interviewId),
+    { streamType: 'audio' },
+  )
+  const recordingEnabled = ref(false)
+
+  watch(() => store.state, (newState) => {
+    if (newState === 'generating_report' && recordingEnabled.value) {
+      recorder.flush()
+    }
+  })
+
+  return { ...recorder, recordingEnabled }
+}
+
+const {
+  state: recorderState,
+  durationMs: recorderDuration,
+  isRecording: isRecorderOn,
+  recordingEnabled,
+  start: startRecorder,
+  stop: stopRecorder,
+  flush: flushRecorder,
+  reset: resetRecorder,
+} = useRecorder()
+
+// 当切换到算法题时，重置代码
+watch(() => store.currentProblem, (problem) => {
+  if (problem) {
+    const lang = codeLanguages.value.find((l) => l.id === codeLang.value)
+    codeValue.value = lang?.template || ''
+    codePanelCollapsed.value = false
+  }
+})
+
+function onCodeLangChange() {
+  const lang = codeLanguages.value.find((l) => l.id === codeLang.value)
+  if (lang) codeValue.value = lang.template
+}
+
+async function submitCode() {
+  if (!store.currentProblem || !codeValue.value.trim()) return
+  codeSubmitting.value = true
+  try {
+    await store.submitCode(store.currentProblem.id, codeLang.value, codeValue.value)
+    await nextTick()
+    scrollToBottom()
+    await speakCurrentQuestion()
+  } catch (e: any) {
+    alert(e.message)
+  } finally {
+    codeSubmitting.value = false
+  }
+}
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 320 }, height: { ideal: 240 } },
+      audio: false,
+    })
+    cameraStream.value = stream
+    cameraEnabled.value = true
+    await nextTick()
+    if (cameraVideoRef.value) {
+      cameraVideoRef.value.srcObject = stream
+    }
+  } catch (e: any) {
+    console.warn('[Interview] camera start failed:', e)
+    cameraEnabled.value = false
+  }
+}
+
+function stopCamera() {
+  if (cameraStream.value) {
+    cameraStream.value.getTracks().forEach((t) => t.stop())
+    cameraStream.value = null
+  }
+  cameraEnabled.value = false
+}
 
 const remainingDisplay = computed(() => {
   const sec = store.remainingTime
@@ -55,6 +170,9 @@ onMounted(async () => {
 
   fallbackAsr.value = new WebSpeechAsrProvider()
 
+  // 启动摄像头（失败不阻塞面试）
+  startCamera()
+
   timer = setInterval(() => {
     if (store.remainingTime <= 0 && store.isRunning) {
       store.endInterview()
@@ -66,6 +184,7 @@ onMounted(async () => {
 
 onUnmounted(async () => {
   if (timer) clearInterval(timer)
+  stopCamera()
   await destroyAvatar()
 })
 
@@ -245,6 +364,47 @@ function scrollToBottom() {
         </div>
 
         <div class="border-t bg-white p-4">
+          <!-- 算法题代码编辑器面板 -->
+          <div v-if="store.currentProblem" class="mb-3 rounded-lg border border-primary-200 bg-primary-50/30">
+            <div class="flex items-center justify-between border-b border-primary-100 px-3 py-2">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-semibold text-primary-700">{{ store.currentProblem.title }}</span>
+                <span class="rounded px-1.5 py-0.5 text-xs"
+                  :class="store.currentProblem.difficulty === '简单' ? 'bg-green-100 text-green-700' : store.currentProblem.difficulty === '中等' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'">
+                  {{ store.currentProblem.difficulty }}
+                </span>
+              </div>
+              <button @click="codePanelCollapsed = !codePanelCollapsed" class="text-xs text-gray-500 hover:text-gray-700">
+                {{ codePanelCollapsed ? '展开' : '收起' }}
+              </button>
+            </div>
+            <div v-show="!codePanelCollapsed" class="p-3">
+              <div class="markdown-body mb-2 max-h-32 overflow-y-auto text-xs text-gray-700" v-html="renderMarkdown(store.currentProblem.description)"></div>
+              <div class="mb-2 flex items-center gap-2">
+                <select v-model="codeLang" @change="onCodeLangChange"
+                  class="rounded border border-gray-300 px-2 py-1 text-xs focus:border-primary-500 focus:outline-none">
+                  <option v-for="lang in codeLanguages" :key="lang.id" :value="lang.id">{{ lang.label }}</option>
+                </select>
+                <button @click="submitCode" :disabled="codeSubmitting || store.state !== 'waiting_answer'"
+                  class="ml-auto rounded bg-primary-600 px-3 py-1 text-xs text-white hover:bg-primary-700 disabled:opacity-50">
+                  {{ codeSubmitting ? '判定中...' : '提交代码' }}
+                </button>
+              </div>
+              <div class="h-48 overflow-hidden rounded border border-gray-200">
+                <VueMonacoEditor :value="codeValue" :language="monacoLangMap[codeLang] || 'plaintext'" theme="vs"
+                  :options="{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true }"
+                  @update:value="(val: string) => (codeValue = val)" />
+              </div>
+              <!-- 上次判定结果 -->
+              <div v-if="store.lastJudgeResult" class="mt-2 rounded bg-gray-50 p-2 text-xs">
+                <span :class="store.lastJudgeResult.status === 'accepted' ? 'text-green-600' : 'text-red-600'" class="font-semibold">
+                  {{ store.lastJudgeResult.status === 'accepted' ? '✓ 通过' : '✗ ' + store.lastJudgeResult.status }}
+                </span>
+                <span class="ml-2 text-gray-500">{{ store.lastJudgeResult.passCount }}/{{ store.lastJudgeResult.totalCount }} 用例</span>
+              </div>
+            </div>
+          </div>
+
           <div v-if="isListening" class="mb-2 rounded-lg bg-primary-50 px-3 py-2 text-sm text-primary-700">
             <span class="animate-pulse">🎤 {{ t('interview.listening') }} </span>
             <span v-if="partialText">{{ partialText }}</span>
@@ -252,6 +412,25 @@ function scrollToBottom() {
           </div>
 
           <div class="flex gap-2">
+            <!-- 录制开关 -->
+            <button
+              v-if="!recordingEnabled"
+              @click="recordingEnabled = true; startRecorder()"
+              class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
+              :title="t('interview.record')"
+            >
+              <svg viewBox="0 0 24 24" class="h-4 w-4 inline" fill="currentColor"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>
+              录制
+            </button>
+            <button
+              v-else
+              @click="recordingEnabled = false; stopRecorder(); flushRecorder()"
+              class="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-100"
+            >
+              <svg viewBox="0 0 24 24" class="h-4 w-4 inline" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
+              {{ isRecorderOn ? '录制中 ' + Math.floor(recorderDuration / 1000) + 's' : '停止录制' }}
+            </button>
+
             <button
               @click="inputMode = inputMode === 'voice' ? 'text' : 'voice'"
               class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
@@ -302,6 +481,36 @@ function scrollToBottom() {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 右下角摄像头 PiP 小窗 -->
+    <div
+      v-if="cameraEnabled"
+      class="fixed bottom-4 right-4 z-30 overflow-hidden rounded-xl border border-white/30 bg-black shadow-xl"
+    >
+      <video
+        v-show="!cameraCollapsed"
+        ref="cameraVideoRef"
+        autoplay
+        playsinline
+        muted
+        class="h-28 w-40 object-cover"
+      />
+      <!-- 小窗标题栏（折叠/展开） -->
+      <div class="absolute right-1 top-1 flex gap-1">
+        <button
+          @click="cameraCollapsed = !cameraCollapsed"
+          class="flex h-6 w-6 items-center justify-center rounded bg-black/40 text-white transition hover:bg-black/60"
+          :title="cameraCollapsed ? '展开' : '收起'"
+        >
+          <svg v-if="cameraCollapsed" viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+          <svg v-else viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L4.5 4.5M15 9h4.5M15 9V4.5M15 9l4.5-4.5M9 15v4.5M9 15H4.5M9 15l-4.5 4.5M15 15h4.5M15 15v4.5m0-4.5l4.5 4.5" /></svg>
+        </button>
+      </div>
+      <!-- 折叠时的占位 -->
+      <div v-if="cameraCollapsed" class="flex h-9 w-40 items-center justify-center bg-black px-2">
+        <span class="text-xs text-white/70">摄像头已收起</span>
       </div>
     </div>
   </div>

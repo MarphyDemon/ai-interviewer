@@ -1,24 +1,49 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getReport, downloadReportPdf } from '@/api/report'
+import {
+  getReport,
+  downloadReportPdf,
+  getSharedReport,
+  getShareStatus,
+  createShareLink,
+  revokeShareLink,
+  type ShareStatus,
+} from '@/api/report'
 import type { ReportData, MatchBreakdownItem } from '@/types'
 
 const { t } = useI18n()
 const router = useRouter()
-const props = defineProps<{ id: string }>()
+const props = defineProps<{ id?: string; token?: string }>()
+
+const shareMode = computed(() => !!props.token)
 
 const report = ref<ReportData | null>(null)
 const loading = ref(true)
 const errorMsg = ref('')
 
+// 分享相关状态（仅 report 模式使用）
+const shareStatus = ref<ShareStatus | null>(null)
+const shareLoading = ref(false)
+const copied = ref(false)
+
 onMounted(async () => {
   try {
-    report.value = await getReport(Number(props.id))
+    if (shareMode.value && props.token) {
+      report.value = await getSharedReport(props.token)
+    } else if (props.id) {
+      report.value = await getReport(Number(props.id))
+      // 拉取分享状态
+      try {
+        shareStatus.value = await getShareStatus(Number(props.id))
+      } catch {
+        // 忽略分享状态失败
+      }
+    }
     refreshMatch()
   } catch (e: any) {
-    errorMsg.value = e.message
+    errorMsg.value = e.message || '报告加载失败'
   } finally {
     loading.value = false
   }
@@ -27,6 +52,7 @@ onMounted(async () => {
 const exporting = ref(false)
 
 async function exportPDF() {
+  if (!props.id) return
   exporting.value = true
   try {
     await downloadReportPdf(Number(props.id))
@@ -54,6 +80,73 @@ function statusMeta(status: MatchBreakdownItem['status']) {
       return { label: status, cls: 'bg-gray-100 text-gray-600' }
   }
 }
+
+const shareUrl = computed(() => {
+  if (shareStatus.value?.token && !shareStatus.value.expired) {
+    return `${window.location.origin}/share/${shareStatus.value.token}`
+  }
+  return ''
+})
+
+async function generateShare() {
+  if (!props.id) return
+  shareLoading.value = true
+  try {
+    const res = await createShareLink(Number(props.id))
+    shareStatus.value = {
+      token: res.token,
+      expiresAt: res.expiresAt,
+      expired: false,
+    }
+    await copyShareUrl()
+  } catch (e: any) {
+    errorMsg.value = e.message || '生成分享链接失败'
+  } finally {
+    shareLoading.value = false
+  }
+}
+
+async function revokeShare() {
+  if (!props.id) return
+  if (!confirm('确认吊销分享链接？吊销后已发出的链接将立即失效。')) return
+  shareLoading.value = true
+  try {
+    await revokeShareLink(Number(props.id))
+    shareStatus.value = null
+  } catch (e: any) {
+    errorMsg.value = e.message || '吊销失败'
+  } finally {
+    shareLoading.value = false
+  }
+}
+
+async function copyShareUrl() {
+  if (!shareUrl.value) return
+  try {
+    await navigator.clipboard.writeText(shareUrl.value)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  } catch {
+    // 剪贴板权限拒绝时降级
+    const ta = document.createElement('textarea')
+    ta.value = shareUrl.value
+    document.body.appendChild(ta)
+    ta.select()
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  }
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return '-'
+  try {
+    return new Date(iso).toLocaleString('zh-CN')
+  } catch {
+    return iso
+  }
+}
 </script>
 
 <template>
@@ -62,6 +155,11 @@ function statusMeta(status: MatchBreakdownItem['status']) {
       <div v-else-if="errorMsg" class="py-20 text-center text-red-500">{{ errorMsg }}</div>
 
       <div v-else-if="report" class="space-y-6">
+        <!-- 分享模式标识 -->
+        <div v-if="shareMode" class="rounded-lg border border-primary-100 bg-primary-50/50 px-4 py-2 text-sm text-primary-700">
+          🔗 您正在查看分享的面试报告
+        </div>
+
         <div class="card">
           <h1 class="mb-4 text-2xl font-bold text-gray-800">{{ t('report.title') }}</h1>
           <div class="mb-6 flex items-center justify-around">
@@ -163,20 +261,78 @@ function statusMeta(status: MatchBreakdownItem['status']) {
           </div>
         </div>
 
-        <div class="flex gap-4">
-          <button
-            @click="exportPDF"
-            :disabled="exporting"
-            class="btn-primary !py-2"
-          >
-            {{ exporting ? t('common.loading') : t('report.exportPdf') }}
-          </button>
-          <button
-            @click="router.push('/history')"
-            class="btn-ghost !py-2"
-          >
-            {{ t('report.viewHistory') }}
-          </button>
+        <!-- 操作按钮（分享模式隐藏） -->
+        <div v-if="!shareMode" class="space-y-4">
+          <!-- 分享链接区 -->
+          <div class="card">
+            <div class="mb-3 flex items-center justify-between">
+              <h3 class="font-semibold text-gray-700">分享报告</h3>
+              <span v-if="shareStatus?.token && !shareStatus.expired" class="text-xs text-gray-400">
+                过期时间：{{ formatDate(shareStatus.expiresAt) }}
+              </span>
+            </div>
+
+            <div v-if="shareStatus?.token && !shareStatus.expired" class="space-y-2">
+              <div class="flex items-center gap-2">
+                <input
+                  :value="shareUrl"
+                  readonly
+                  class="flex-1 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600"
+                  @click="($event.target as HTMLInputElement).select()"
+                />
+                <button
+                  @click="copyShareUrl"
+                  class="rounded-lg bg-primary-50 px-3 py-2 text-sm font-medium text-primary-700 transition hover:bg-primary-100"
+                >
+                  {{ copied ? '✓ 已复制' : '复制' }}
+                </button>
+                <button
+                  @click="revokeShare"
+                  :disabled="shareLoading"
+                  class="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+                >
+                  吊销
+                </button>
+              </div>
+              <p class="text-xs text-gray-400">链接 7 天内有效，可随时吊销</p>
+            </div>
+
+            <div v-else-if="shareStatus?.expired" class="space-y-2">
+              <p class="text-sm text-amber-600">分享链接已过期</p>
+              <button
+                @click="generateShare"
+                :disabled="shareLoading"
+                class="btn-primary !py-2"
+              >
+                {{ shareLoading ? '生成中...' : '重新生成分享链接' }}
+              </button>
+            </div>
+
+            <button
+              v-else
+              @click="generateShare"
+              :disabled="shareLoading"
+              class="btn-primary !py-2"
+            >
+              {{ shareLoading ? '生成中...' : '生成分享链接' }}
+            </button>
+          </div>
+
+          <div class="flex gap-4">
+            <button
+              @click="exportPDF"
+              :disabled="exporting"
+              class="btn-primary !py-2"
+            >
+              {{ exporting ? t('common.loading') : t('report.exportPdf') }}
+            </button>
+            <button
+              @click="router.push('/history')"
+              class="btn-ghost !py-2"
+            >
+              {{ t('report.viewHistory') }}
+            </button>
+          </div>
         </div>
       </div>
     </div>

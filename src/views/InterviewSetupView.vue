@@ -5,6 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { useResumeStore } from '@/stores/resume'
 import { useJdStore } from '@/stores/jd'
 import { useInterviewStore } from '@/stores/interview'
+import { getPositions } from '@/api/knowledge'
+import DeviceCheckModal from '@/components/DeviceCheckModal.vue'
 import type { Difficulty, InterviewerStyle } from '@/types'
 
 const { t } = useI18n()
@@ -13,22 +15,25 @@ const resumeStore = useResumeStore()
 const jdStore = useJdStore()
 const interviewStore = useInterviewStore()
 
-const position = ref('frontend')
+const position = ref('前端')
 const difficulty = ref<Difficulty>('mid')
 const duration = ref(30)
 const style = ref<InterviewerStyle>('friendly')
 const selectedResumeId = ref<number | undefined>(undefined)
 const selectedJdId = ref<number | undefined>(undefined)
 const starting = ref(false)
+const showDeviceModal = ref(false)
 
-const positions = ['frontend', 'backend', 'algorithm', 'product'] as const
+// 兜底默认岗位列表（API 失败时使用）
+const FALLBACK_POSITIONS = ['前端', '后端', '算法', '产品', '测试', '测试开发', '运维']
+const positions = ref<string[]>([...FALLBACK_POSITIONS])
 const difficulties: Difficulty[] = ['junior', 'mid', 'senior']
 const durations = [15, 30, 45]
 const styles: InterviewerStyle[] = ['strict', 'friendly', 'pressure']
 
 // 简历管理
 const resumeFileInput = ref<HTMLInputElement | null>(null)
-const uploadPosition = ref('frontend')
+const uploadPosition = ref('前端')
 const uploading = ref(false)
 
 // JD 管理
@@ -39,9 +44,25 @@ const jdUploading = ref(false)
 const jdCreating = ref(false)
 const showJdForm = ref(false)
 
-onMounted(() => {
+onMounted(async () => {
   resumeStore.fetchResumes()
   jdStore.fetchJds()
+  try {
+    const { positions: dbPositions } = await getPositions()
+    if (dbPositions && dbPositions.length > 0) {
+      positions.value = dbPositions
+      // 默认选中第一个
+      if (!positions.value.includes(position.value)) {
+        position.value = positions.value[0]
+      }
+      if (!positions.value.includes(uploadPosition.value)) {
+        uploadPosition.value = positions.value[0]
+      }
+    }
+  } catch (e) {
+    // API 失败则使用兜底列表
+    console.warn('[Setup] fetch positions failed, using fallback', e)
+  }
 })
 
 async function handleResumeUpload() {
@@ -93,6 +114,12 @@ async function handleJdCreate() {
 }
 
 async function start() {
+  // 弹出设备调试 modal
+  showDeviceModal.value = true
+}
+
+async function actuallyStart() {
+  showDeviceModal.value = false
   starting.value = true
   try {
     await interviewStore.start({
@@ -127,7 +154,7 @@ async function start() {
           v-model="uploadPosition"
           class="w-full rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
         >
-          <option v-for="p in positions" :key="p" :value="p">{{ t('positions.' + p) }}</option>
+          <option v-for="p in positions" :key="p" :value="p">{{ p }}</option>
         </select>
       </div>
       <input ref="resumeFileInput" type="file" accept=".pdf,.docx" class="hidden" @change="handleResumeUpload" />
@@ -146,13 +173,21 @@ async function start() {
           :key="resume.id"
           class="flex items-center justify-between rounded-lg bg-primary-50/50 px-3 py-2"
         >
-          <div>
-            <p class="text-sm font-medium text-gray-700">{{ resume.filename }}</p>
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-medium text-gray-700">{{ resume.filename }}</p>
             <p class="text-xs text-gray-400">{{ t('home.matchScore') }}: {{ resume.analysisResult?.positionMatch || '-' }}%</p>
           </div>
-          <button @click="resumeStore.remove(resume.id)" class="text-sm text-red-400 transition hover:text-red-600">
-            {{ t('common.delete') }}
-          </button>
+          <div class="flex items-center gap-2">
+            <button
+              @click="router.push({ path: `/resume/${resume.id}/report`, query: { position: uploadPosition } })"
+              class="text-sm text-primary-600 transition hover:text-primary-700"
+            >
+              详细报告
+            </button>
+            <button @click="resumeStore.remove(resume.id)" class="text-sm text-red-400 transition hover:text-red-600">
+              {{ t('common.delete') }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -234,7 +269,7 @@ async function start() {
               position === p ? 'bg-gradient-brand text-white shadow-soft' : 'bg-primary-50/60 text-gray-700 hover:bg-primary-100',
             ]"
           >
-            {{ t('positions.' + p) }}
+            {{ p }}
           </button>
         </div>
       </div>
@@ -321,5 +356,12 @@ async function start() {
         {{ starting ? t('setup.starting') : t('setup.start') }}
       </button>
     </div>
+
+    <!-- 设备调试 Modal -->
+    <DeviceCheckModal
+      :visible="showDeviceModal"
+      @close="showDeviceModal = false"
+      @start="actuallyStart"
+    />
   </div>
 </template>

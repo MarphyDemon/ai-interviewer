@@ -1,10 +1,10 @@
 import json
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from sqlmodel import Session, select
+from sqlmodel import Session, select, or_
 from server.database import get_session
-from server.models import KnowledgeDoc
+from server.models import KnowledgeDoc, User
 from server.services.knowledge_service import process_knowledge_doc, delete_knowledge
-from server.services.common import get_or_create_user
+from server.services.auth_service import get_current_user
 import asyncio
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
@@ -14,9 +14,8 @@ router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 async def upload_knowledge(
     files: list[UploadFile] = File(...),
     session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
 ):
-    user_uuid = "default"
-    user_id = get_or_create_user(session, user_uuid)
     ids = []
 
     for file in files:
@@ -27,7 +26,7 @@ async def upload_knowledge(
         text = content.decode("utf-8")
 
         doc = KnowledgeDoc(
-            user_id=user_id,
+            user_id=user.id,
             filename=file.filename,
             content=text,
             status="processing",
@@ -49,8 +48,10 @@ async def process_knowledge_doc_async(doc_id: int):
 
 
 @router.get("")
-async def list_knowledge(session: Session = Depends(get_session)):
-    docs = session.exec(select(KnowledgeDoc)).all()
+async def list_knowledge(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    docs = session.exec(
+        select(KnowledgeDoc).where(or_(KnowledgeDoc.user_id == user.id, KnowledgeDoc.is_public == True))
+    ).all()
     return [
         {
             "id": d.id,
@@ -66,6 +67,26 @@ async def list_knowledge(session: Session = Depends(get_session)):
     ]
 
 
+# 兜底默认岗位列表（DB 无数据时使用）
+_DEFAULT_POSITIONS = ["前端", "后端", "算法", "产品", "测试", "测试开发", "运维"]
+
+
+@router.get("/positions")
+async def list_positions(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    """返回 DB distinct position + 兜底默认列表，合并去重"""
+    rows = session.exec(
+        select(KnowledgeDoc.position).where(KnowledgeDoc.position != "", or_(KnowledgeDoc.user_id == user.id, KnowledgeDoc.is_public == True)).distinct()
+    ).all()
+    positions = [p for p in rows if p]
+    # 合并兜底列表，去重保序
+    seen = set(positions)
+    for p in _DEFAULT_POSITIONS:
+        if p not in seen:
+            positions.append(p)
+            seen.add(p)
+    return {"positions": positions}
+
+
 @router.get("/{doc_id}/status")
 async def get_status(doc_id: int, session: Session = Depends(get_session)):
     doc = session.get(KnowledgeDoc, doc_id)
@@ -75,6 +96,9 @@ async def get_status(doc_id: int, session: Session = Depends(get_session)):
 
 
 @router.delete("/{doc_id}")
-async def delete_doc(doc_id: int, session: Session = Depends(get_session)):
+async def delete_doc(doc_id: int, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    doc = session.get(KnowledgeDoc, doc_id)
+    if not doc or doc.user_id != user.id:
+        raise HTTPException(404, "Document not found")
     delete_knowledge(session, doc_id)
     return {"ok": True}

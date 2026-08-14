@@ -7,6 +7,9 @@ from sqlmodel import SQLModel, Field
 class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     anonymous_uuid: str = Field(unique=True, index=True)
+    username: Optional[str] = Field(default=None, unique=True, index=True)
+    password_hash: Optional[str] = None
+    preferred_avatar_id: Optional[int] = Field(default=None, foreign_key="avatar.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -20,6 +23,7 @@ class KnowledgeDoc(SQLModel, table=True):
     tags: str = "[]"
     content: str = ""
     status: str = "processing"
+    is_public: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -78,6 +82,17 @@ class Report(SQLModel, table=True):
     job_fit: str = ""
     match_score: Optional[float] = Field(default=None)
     match_breakdown: str = "[]"
+    share_token: Optional[str] = Field(default=None, index=True)
+    share_expires_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ResumeReport(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    resume_id: int = Field(foreign_key="resume.id", index=True)
+    position: str
+    grade: str = ""
+    report_data: str = "{}"
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -104,4 +119,71 @@ class ChatMessage(SQLModel, table=True):
     conversation_id: int = Field(foreign_key="chatconversation.id")
     role: str
     content: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AvatarProviderConfig(SQLModel, table=True):
+    """数字人服务凭证（ASR/TTS/形象捆绑，镜像 LLMConfig 模式）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    app_id: str
+    app_secret: str  # Fernet 加密存储
+    gateway_server: str
+    is_active: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Avatar(SQLModel, table=True):
+    """数字人形象目录（用户级选择，资源后补）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    cover_url: str = ""
+    provider_config_id: Optional[int] = Field(default=None, foreign_key="avatarproviderconfig.id")
+    extra: str = "{}"  # JSON 扩展字段（如 xmov avatar_id、lottie 路径等）
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AlgorithmProblem(SQLModel, table=True):
+    """算法题库（P3 代码与算法练习模块）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    description: str = ""  # Markdown 题面
+    difficulty: str = "中等"  # 简单/中等/困难
+    position: str = ""  # 关联岗位方向（前端/后端/通用）
+    tags: str = "[]"  # JSON 数组，如 ["数组","双指针"]
+    examples: str = "[]"  # JSON 数组，[{input, output, explanation}]
+    test_cases: str = "[]"  # JSON 数组，[{input, expected}]（隐藏用例）
+    time_limit_ms: int = 2000
+    memory_limit_mb: int = 256
+    is_public: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CodeSubmission(SQLModel, table=True):
+    """用户代码提交记录（P3 判题结果）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    problem_id: int = Field(foreign_key="algorithmproblem.id", index=True)
+    language: str  # python/javascript/...
+    code: str
+    status: str = "pending"  # pending/running/accepted/wrong_answer/compile_error/runtime_error/timeout
+    stdout: str = ""
+    stderr: str = ""
+    pass_count: int = 0
+    total_count: int = 0
+    duration_ms: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Recording(SQLModel, table=True):
+    """面试回放录制文件记录（P4）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    interview_id: int = Field(foreign_key="interview.id", index=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    stream_type: str = "audio"  # audio / video / screen
+    file_key: str = ""  # storage 中的 key
+    file_size: int = 0
+    duration_ms: int = 0
+    mime_type: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow)

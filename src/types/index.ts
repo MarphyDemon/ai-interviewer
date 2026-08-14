@@ -1,3 +1,9 @@
+export interface UserInfo {
+  id: number
+  username: string
+  preferredAvatarId: number | null
+}
+
 export type Difficulty = 'junior' | 'mid' | 'senior'
 
 export type InterviewerStyle = 'strict' | 'friendly' | 'pressure'
@@ -34,12 +40,24 @@ export interface ChatMessage {
   timestamp: number
 }
 
-export type AIAction = 'ask' | 'followup' | 'next_question' | 'end'
+export type AIAction = 'ask' | 'followup' | 'next_question' | 'algorithm' | 'end'
+
+export interface InterviewProblem {
+  id: number
+  title: string
+  description: string
+  difficulty: string
+  tags: string[]
+  examples: { input: string; output: string; explanation?: string }[]
+  timeLimitMs: number
+  memoryLimitMb: number
+}
 
 export interface AIResponse {
   action: AIAction
   content: string
   reasoning?: string
+  problem?: InterviewProblem
 }
 
 export interface AvatarConfig {

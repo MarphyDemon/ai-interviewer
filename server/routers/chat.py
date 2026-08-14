@@ -5,8 +5,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from server.database import get_session, engine
-from server.models import ChatConversation, ChatMessage
-from server.services.common import get_or_create_user
+from server.models import ChatConversation, ChatMessage, User
+from server.services.auth_service import get_current_user
 from server.services.chat_service import stream_chat
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -25,9 +25,8 @@ class MessageIn(BaseModel):
 
 
 @router.post("/conversations")
-def create_conversation(payload: CreateConversationIn, session: Session = Depends(get_session)):
-    user_id = get_or_create_user(session, "default")
-    conv = ChatConversation(user_id=user_id, title=payload.title or "新对话")
+def create_conversation(payload: CreateConversationIn, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    conv = ChatConversation(user_id=user.id, title=payload.title or "新对话")
     session.add(conv)
     session.commit()
     session.refresh(conv)
@@ -40,9 +39,9 @@ def create_conversation(payload: CreateConversationIn, session: Session = Depend
 
 
 @router.get("/conversations")
-def list_conversations(session: Session = Depends(get_session)):
+def list_conversations(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     convs = session.exec(
-        select(ChatConversation).order_by(ChatConversation.updated_at.desc())
+        select(ChatConversation).where(ChatConversation.user_id == user.id).order_by(ChatConversation.updated_at.desc())
     ).all()
     return [
         {
@@ -56,9 +55,9 @@ def list_conversations(session: Session = Depends(get_session)):
 
 
 @router.get("/conversations/{conv_id}/messages")
-def get_messages(conv_id: int, session: Session = Depends(get_session)):
+def get_messages(conv_id: int, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     conv = session.get(ChatConversation, conv_id)
-    if not conv:
+    if not conv or conv.user_id != user.id:
         raise HTTPException(404, "Conversation not found")
     msgs = session.exec(
         select(ChatMessage)
@@ -77,9 +76,9 @@ def get_messages(conv_id: int, session: Session = Depends(get_session)):
 
 
 @router.patch("/conversations/{conv_id}")
-def rename_conversation(conv_id: int, payload: RenameIn, session: Session = Depends(get_session)):
+def rename_conversation(conv_id: int, payload: RenameIn, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     conv = session.get(ChatConversation, conv_id)
-    if not conv:
+    if not conv or conv.user_id != user.id:
         raise HTTPException(404, "Conversation not found")
     conv.title = payload.title
     session.add(conv)
@@ -88,9 +87,9 @@ def rename_conversation(conv_id: int, payload: RenameIn, session: Session = Depe
 
 
 @router.delete("/conversations/{conv_id}")
-def delete_conversation(conv_id: int, session: Session = Depends(get_session)):
+def delete_conversation(conv_id: int, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     conv = session.get(ChatConversation, conv_id)
-    if not conv:
+    if not conv or conv.user_id != user.id:
         raise HTTPException(404, "Conversation not found")
     msgs = session.exec(
         select(ChatMessage).where(ChatMessage.conversation_id == conv_id)
@@ -103,10 +102,11 @@ def delete_conversation(conv_id: int, session: Session = Depends(get_session)):
 
 
 @router.post("/conversations/{conv_id}/messages/stream")
-async def chat_stream(conv_id: int, payload: MessageIn):
+async def chat_stream(conv_id: int, payload: MessageIn, user: User = Depends(get_current_user)):
     # 校验会话存在
     with Session(engine) as check_session:
-        if not check_session.get(ChatConversation, conv_id):
+        conv = check_session.get(ChatConversation, conv_id)
+        if not conv or conv.user_id != user.id:
             raise HTTPException(404, "Conversation not found")
 
     async def event_stream():

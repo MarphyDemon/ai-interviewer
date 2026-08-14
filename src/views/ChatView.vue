@@ -24,10 +24,34 @@ const speaking = ref(false)
 const speakBuffer = ref('')
 const streamAborted = ref(false)
 
+// 全屏状态
+const avatarStageEl = ref<HTMLElement | null>(null)
+const isFullscreen = ref(false)
+const fullscreenPartialText = ref('')
+
 const hasConversation = computed(() => store.currentId !== null)
+
+/** 最新一条 assistant 消息内容（全屏字幕用） */
+const latestAssistantText = computed(() => {
+  const msgs = store.currentMessages
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'assistant') return msgs[i].content
+  }
+  return ''
+})
+
+function handleFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement
+  if (!isFullscreen.value) {
+    // 退出全屏时停止 ASR
+    stopListening()
+    fullscreenPartialText.value = ''
+  }
+}
 
 onMounted(() => {
   store.fetchConversations()
+  document.addEventListener('fullscreenchange', handleFullscreenChange)
 })
 
 onUnmounted(() => {
@@ -35,6 +59,8 @@ onUnmounted(() => {
   stopSpeaking()
   stopListening()
   destroyAvatar()
+  document.removeEventListener('fullscreenchange', handleFullscreenChange)
+  if (document.fullscreenElement) document.exitFullscreen()
 })
 
 // 流式输出时持续滚动到底部
@@ -180,6 +206,61 @@ function stopListening() {
   const provider = getProvider()
   provider?.stopASR?.()
   listening.value = false
+}
+
+/** 进入数字人全屏 */
+async function enterFullscreen() {
+  try {
+    await avatarStageEl.value?.requestFullscreen()
+  } catch (e) {
+    console.warn('[Chat Fullscreen] request failed:', e)
+  }
+}
+
+/** 退出数字人全屏 */
+function exitFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen()
+  }
+}
+
+/** 全屏下的麦克风：ASR final 后自动发送 */
+function toggleFullscreenMic() {
+  if (listening.value) {
+    stopListening()
+    fullscreenPartialText.value = ''
+    return
+  }
+  const provider = getProvider()
+  if (!provider || !provider.isReady()) return
+  listening.value = true
+  fullscreenPartialText.value = ''
+  provider.startASR((result) => {
+    if (result.isFinal && result.text) {
+      const msg = result.text.trim()
+      if (msg && !store.streaming) {
+        fullscreenPartialText.value = ''
+        listening.value = false
+        sendFullscreenMessage(msg)
+      }
+    } else {
+      fullscreenPartialText.value = result.text
+    }
+  }).catch(() => {
+    listening.value = false
+  })
+}
+
+/** 全屏下直接发送消息（不经 input 中转） */
+async function sendFullscreenMessage(msg: string) {
+  streamAborted.value = false
+  if (autoSpeak.value) {
+    stopSpeaking()
+    getProvider()?.startSpeakStream?.()
+  }
+  await store.sendMessage(msg, (delta) => feedSpeak(delta))
+  if (autoSpeak.value && !streamAborted.value) endSpeak()
+  streamAborted.value = false
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -395,11 +476,24 @@ async function handleDelete(id: number) {
           >
             ⏹ 打断播报
           </button>
+          <!-- 全屏按钮 -->
+          <button
+            v-if="!isFullscreen"
+            type="button"
+            class="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-600 transition hover:bg-primary-100"
+            title="全屏数字人"
+            @click="enterFullscreen"
+          >
+            ⤢ 全屏
+          </button>
         </div>
       </div>
 
-      <!-- 数字人容器 -->
-      <div class="relative flex-1 overflow-hidden rounded-2xl border border-primary-100/60 bg-gradient-brand-soft">
+      <!-- 数字人舞台（可全屏） -->
+      <div
+        ref="avatarStageEl"
+        class="avatar-stage relative flex-1 overflow-hidden rounded-2xl border border-primary-100/60 bg-gradient-brand-soft"
+      >
         <div id="chat-avatar-container" class="h-full w-full"></div>
         <div v-if="avatarLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/60 backdrop-blur">
           <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-200 border-t-primary-600"></div>
@@ -411,8 +505,65 @@ async function handleDelete(id: number) {
           </span>
           <p class="text-xs text-gray-400">{{ t('chat.avatarFailed') }}</p>
         </div>
+
+        <!-- 全屏模式浮层 -->
+        <template v-if="isFullscreen">
+          <!-- 退出按钮 -->
+          <button
+            type="button"
+            class="absolute right-4 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-gray-600 shadow-soft transition hover:bg-white"
+            title="退出全屏（ESC）"
+            @click="exitFullscreen"
+          >
+            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+
+          <!-- 底部字幕浮层 -->
+          <div class="absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-black/70 via-black/40 to-transparent px-6 pb-6 pt-16">
+            <!-- 上行：ASR 实时字幕 -->
+            <div v-if="fullscreenPartialText || listening" class="mb-3 text-right">
+              <p class="mb-1 text-xs text-white/60">🎤 {{ listening ? '正在聆听...' : '语音输入' }}</p>
+              <p class="ml-auto max-w-2xl rounded-2xl rounded-br-sm bg-white/20 px-4 py-2 text-sm text-white backdrop-blur">
+                {{ fullscreenPartialText || '...' }}
+              </p>
+            </div>
+
+            <!-- 下行：数字人最新消息字幕 -->
+            <div v-if="latestAssistantText" class="mb-4">
+              <p class="mb-1 text-xs text-white/60">💬 数字人</p>
+              <p class="max-w-2xl rounded-2xl rounded-bl-sm bg-white/90 px-4 py-2 text-sm leading-relaxed text-gray-800 backdrop-blur">
+                {{ latestAssistantText }}
+              </p>
+            </div>
+
+            <!-- 麦克风按钮 + 停止生成 -->
+            <div class="flex items-center justify-center gap-4">
+              <button
+                v-if="store.streaming"
+                type="button"
+                @click="handleStop"
+                class="flex h-14 w-14 items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition hover:bg-red-600"
+                title="停止生成"
+              >
+                <svg viewBox="0 0 24 24" class="h-6 w-6" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+              </button>
+              <button
+                v-else
+                type="button"
+                @click="toggleFullscreenMic"
+                :class="[
+                  'flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition',
+                  listening ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-primary-600 hover:bg-primary-50',
+                ]"
+                :title="listening ? '停止语音输入' : '开始语音输入'"
+              >
+                <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-14 0m7 7v3m-4 0h8m-4-7a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+              </button>
+            </div>
+          </div>
+        </template>
       </div>
-      <p class="mt-2 text-center text-xs text-gray-400">{{ t('chat.avatarHint') }}</p>
+      <p v-if="!isFullscreen" class="mt-2 text-center text-xs text-gray-400">{{ t('chat.avatarHint') }}</p>
     </aside>
   </div>
 </template>
