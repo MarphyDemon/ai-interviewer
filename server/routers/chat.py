@@ -96,6 +96,7 @@ def delete_conversation(conv_id: int, session: Session = Depends(get_session), u
     ).all()
     for m in msgs:
         session.delete(m)
+    session.flush()
     session.delete(conv)
     session.commit()
     return {"ok": True}

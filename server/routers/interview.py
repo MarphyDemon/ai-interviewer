@@ -280,6 +280,7 @@ async def delete_interview(
     for m in messages:
         session.delete(m)
 
+    session.flush()
     session.delete(interview)
     session.commit()
     return {"ok": True}
@@ -313,6 +314,7 @@ async def batch_delete_interviews(
         for m in messages:
             session.delete(m)
 
+        session.flush()
         session.delete(interview)
         deleted += 1
 
