@@ -10,6 +10,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: always
+    dns:
+      - 223.5.5.5
+      - 8.8.8.8
     networks:
       - ai-network
 
@@ -29,6 +32,9 @@ services:
       - ./data:/app/data
       - ./server/.env:/app/server/.env:ro
     restart: always
+    dns:
+      - 223.5.5.5
+      - 8.8.8.8
     networks:
       - ai-network
 
@@ -42,8 +48,11 @@ services:
       - ./dist:/usr/share/nginx/html:ro
       - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     ports:
-      - "80:80"
+      - "${APP_PORT:-8080}:80"
     restart: always
+    dns:
+      - 223.5.5.5
+      - 8.8.8.8
     networks:
       - ai-network
 

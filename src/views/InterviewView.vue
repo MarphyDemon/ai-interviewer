@@ -75,14 +75,12 @@ const useRecorder = () => {
 }
 
 const {
-  state: recorderState,
   durationMs: recorderDuration,
   isRecording: isRecorderOn,
   recordingEnabled,
   start: startRecorder,
   stop: stopRecorder,
   flush: flushRecorder,
-  reset: resetRecorder,
 } = useRecorder()
 
 // 当切换到算法题时，重置代码

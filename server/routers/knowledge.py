@@ -95,6 +95,26 @@ async def get_status(doc_id: int, session: Session = Depends(get_session)):
     return {"status": doc.status}
 
 
+@router.post("/reindex")
+async def reindex_all(
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """重新索引所有已存在的知识库文档（迁移后使用）"""
+    docs = session.exec(
+        select(KnowledgeDoc).where(
+            KnowledgeDoc.status == "ready",
+            or_(KnowledgeDoc.user_id == user.id, KnowledgeDoc.is_public == True),
+        )
+    ).all()
+    reindexed = 0
+    for doc in docs:
+        delete_doc_chunks(doc.id)
+        asyncio.create_task(process_knowledge_doc_async(doc.id))
+        reindexed += 1
+    return {"reindexed": reindexed, "message": "正在重建向量索引，请稍后刷新查看"}
+
+
 @router.delete("/{doc_id}")
 async def delete_doc(doc_id: int, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     doc = session.get(KnowledgeDoc, doc_id)

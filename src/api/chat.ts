@@ -32,7 +32,10 @@ export async function streamMessage(
 ): Promise<string> {
   const resp = await fetch(`/api/chat/conversations/${convId}/messages/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${localStorage.getItem('user_token') || ''}`,
+    },
     body: JSON.stringify({ message }),
     signal,
   })

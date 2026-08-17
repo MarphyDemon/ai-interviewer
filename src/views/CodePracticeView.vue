@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
-import { useI18n } from 'vue-i18n'
 import {
   getLanguages,
   runCode,
@@ -11,8 +10,6 @@ import {
   type CodeChatMessage,
 } from '@/api/code'
 import { renderMarkdown } from '@/utils/markdown'
-
-const { t } = useI18n()
 
 // ---------- 消息 ----------
 const messages = ref<CodeChatMessage[]>([])

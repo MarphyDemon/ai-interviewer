@@ -133,17 +133,21 @@ if [ -n "$MISSING_VARS" ]; then
 fi
 echo -e "${GREEN}✓ 环境配置检查通过${NC}"
 
-# 3. 构建前端
-echo -e "\n${YELLOW}[3/6] 构建前端产物...${NC}"
+# 3. 构建前端（如果已有 dist/ 则跳过）
+echo -e "\n${YELLOW}[3/6] 检查前端产物...${NC}"
 
-if [ ! -d "node_modules" ]; then
-    echo "安装前端依赖..."
-    npm install
+if [ -f "dist/index.html" ] && [ -d "dist/assets" ]; then
+    echo -e "${GREEN}✓ 检测到预构建的 dist/ 目录，跳过前端构建${NC}"
+else
+    echo "在服务器上构建前端..."
+    if [ ! -d "node_modules" ]; then
+        echo "安装前端依赖..."
+        npm install
+    fi
+    echo "构建前端（Web 模式）..."
+    npm run build:web
+    echo -e "${GREEN}✓ 前端构建完成，产物在 dist/ 目录${NC}"
 fi
-
-echo "构建前端（Web 模式）..."
-npm run build:web
-echo -e "${GREEN}✓ 前端构建完成，产物在 dist/ 目录${NC}"
 
 # 4. 创建必要目录
 echo -e "\n${YELLOW}[4/6] 创建必要目录...${NC}"
@@ -172,26 +176,30 @@ if grep -q "^ENCRYPTION_KEY=change-me-in-production-32bytes!!$" server/.env; the
 fi
 
 # 6. 启动服务
-echo -e "\n${YELLOW}[6/6] 启动 Docker Compose 服务...${NC}"
+APP_PORT="${APP_PORT:-8080}"
+echo -e "\n${YELLOW}[6/6] 启动 Docker Compose 服务（端口: $APP_PORT）...${NC}"
 
 echo "停止旧服务（如果存在）..."
 docker compose -f docker-compose.prod.yml down 2>/dev/null || true
 
 echo "构建并启动服务..."
-docker compose -f docker-compose.prod.yml up -d --build
+APP_PORT=$APP_PORT docker compose -f docker-compose.prod.yml up -d --build
 
 # 等待服务就绪
 echo -e "\n${YELLOW}等待服务就绪...${NC}"
 sleep 5
+
+SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 
 echo -e "\n${GREEN}============================================${NC}"
 echo -e "${GREEN}🚀 AI 面试官部署完成！${NC}"
 echo -e "${GREEN}============================================${NC}"
 echo -e ""
 echo -e "访问地址:"
-echo -e "  本地访问:  http://localhost"
-echo -e "  API 文档:  http://localhost/docs"
-echo -e "  健康检查:  http://localhost/api/health"
+echo -e "  本机访问:  http://localhost:$APP_PORT"
+echo -e "  外部访问:  http://$SERVER_IP:$APP_PORT"
+echo -e "  API 文档:  http://localhost:$APP_PORT/docs"
+echo -e "  健康检查:  http://localhost:$APP_PORT/api/health"
 echo -e ""
 echo -e "常用命令:"
 echo -e "  查看状态:  docker compose -f docker-compose.prod.yml ps"
@@ -199,5 +207,5 @@ echo -e "  查看日志:  docker compose -f docker-compose.prod.yml logs -f"
 echo -e "  停止服务:  docker compose -f docker-compose.prod.yml down"
 echo -e "  重启服务:  docker compose -f docker-compose.prod.yml restart"
 echo -e ""
-echo -e "${YELLOW}⚠ 如果使用云服务器，请确保安全组开放 80 端口${NC}"
-echo -e "${YELLOW}⚠ 生产环境建议配置 HTTPS（参见文档第 6 节）${NC}"
+echo -e "${YELLOW}⚠ 如需修改端口，执行: APP_PORT=9090 ./deploy.sh${NC}"
+echo -e "${YELLOW}⚠ 请确保防火墙开放端口 $APP_PORT${NC}"
