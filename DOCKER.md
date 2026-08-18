@@ -2,7 +2,7 @@
 
 ## 前置条件
 
-1. 安装 Docker Desktop：https://www.docker.com/products/docker-desktop/
+1. 安装 Docker Desktop：<https://www.docker.com/products/docker-desktop/>
 2. 启动 Docker Desktop（任务栏图标不闪烁即为启动完成）
 
 ## 首次启动（构建镜像 + 启动所有服务）
@@ -93,3 +93,4 @@ docker-compose down -v
 # 删除构建的镜像
 docker rmi ai-interviewer-backend
 ```
+

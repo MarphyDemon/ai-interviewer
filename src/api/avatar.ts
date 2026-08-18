@@ -5,19 +5,20 @@ export function getAvatarConfig(): Promise<AvatarConfig> {
   return client.get('/avatar/config')
 }
 
-export interface AvatarItem {
-  id: number
+export interface HomepageAvatarItem {
+  id: number | null
   name: string
-  coverUrl: string
-  extra: { emoji?: string; color?: string; [k: string]: unknown }
+  avatarImage: string
+  isDefault: boolean
+  isSelected: boolean
 }
 
-export function getAvatarList(): Promise<AvatarItem[]> {
-  return client.get('/avatar/list')
+export function getHomepageAvatars(): Promise<HomepageAvatarItem[]> {
+  return client.get('/avatar/homepage-avatars')
 }
 
 export function setPreferredAvatar(
-  avatarId: number,
-): Promise<{ ok: boolean; preferredAvatarId: number }> {
-  return client.put('/avatar/preference', { avatarId })
+  avatarConfigId: number | null,
+): Promise<{ ok: boolean; preferredAvatarConfigId: number | null }> {
+  return client.put('/avatar/preference', { avatarConfigId })
 }

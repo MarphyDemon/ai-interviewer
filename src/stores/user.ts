@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import type { UserInfo } from '@/types'
+import { ref, computed } from 'vue'
+import type { UserInfo, NotificationItem } from '@/types'
 import * as authApi from '@/api/auth'
+import * as settingsApi from '@/api/settings'
 import { detectHost } from '@/utils/bridge'
 
 const TOKEN_KEY = 'user_token'
@@ -103,5 +104,36 @@ export const useUserStore = defineStore('user', () => {
     clearToken()
   }
 
-  return { token, user, isLoggedIn, initTokenFromStorage, setToken, clearToken, fetchMe, doLogin, doRegister, logout }
+  const isAdmin = computed(() => user.value?.role === 'admin')
+
+  const notifications = ref<NotificationItem[]>([])
+  const unreadCount = computed(() => notifications.value.filter((n) => !n.isRead).length)
+
+  async function fetchNotifications() {
+    if (!isLoggedIn.value) return
+    try {
+      notifications.value = await settingsApi.getNotifications()
+    } catch {
+      notifications.value = []
+    }
+  }
+
+  async function markNotificationRead(nid: number) {
+    await settingsApi.markNotificationRead(nid)
+    const n = notifications.value.find((x) => x.id === nid)
+    if (n) n.isRead = true
+  }
+
+  async function markAllRead() {
+    await settingsApi.markAllNotificationsRead()
+    notifications.value.forEach((n) => (n.isRead = true))
+  }
+
+  return {
+    token, user, isLoggedIn, isAdmin,
+    notifications, unreadCount,
+    initTokenFromStorage, setToken, clearToken,
+    fetchMe, doLogin, doRegister, logout,
+    fetchNotifications, markNotificationRead, markAllRead,
+  }
 })

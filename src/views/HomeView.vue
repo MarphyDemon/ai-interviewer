@@ -3,33 +3,52 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
-import { getAvatarList, setPreferredAvatar, type AvatarItem } from '@/api/avatar'
+import { getHomepageAvatars, setPreferredAvatar, type HomepageAvatarItem } from '@/api/avatar'
+import OnboardingGuide from '@/components/common/OnboardingGuide.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const userStore = useUserStore()
 
-const avatars = ref<AvatarItem[]>([])
+const avatars = ref<HomepageAvatarItem[]>([])
+const loadingAvatars = ref(true)
+const showOnboarding = ref(false)
 
 onMounted(async () => {
   if (userStore.isLoggedIn) {
     try {
-      avatars.value = await getAvatarList()
+      avatars.value = await getHomepageAvatars()
     } catch {
       // 忽略加载失败
+    } finally {
+      loadingAvatars.value = false
     }
+    const completed = localStorage.getItem('onboarding_completed')
+    if (!completed) showOnboarding.value = true
+  } else {
+    loadingAvatars.value = false
   }
 })
 
-async function selectAvatar(id: number) {
+async function selectAvatar(avatar: HomepageAvatarItem) {
   try {
-    await setPreferredAvatar(id)
+    await setPreferredAvatar(avatar.id)
     if (userStore.user) {
-      userStore.user.preferredAvatarId = id
+      userStore.user.preferredAvatarConfigId = avatar.id
     }
+    // 更新本地状态
+    avatars.value.forEach(a => { a.isSelected = (a.id === avatar.id) })
   } catch (e: any) {
     alert(e.message)
   }
+}
+
+function displayName(a: HomepageAvatarItem): string {
+  return a.isDefault ? t('home.defaultAvatarName') : a.name
+}
+
+function isSelected(a: HomepageAvatarItem): boolean {
+  return a.isSelected
 }
 
 const features = [
@@ -70,34 +89,52 @@ function go(path: string) {
         </p>
 
         <div class="mt-10 flex flex-col items-center justify-center gap-3 animate-fade-up sm:flex-row [animation-delay:0.15s]">
-          <button class="btn-primary w-full sm:w-auto" @click="go('/setup')">
+          <button class="btn-primary w-full sm:w-auto min-h-[48px]" @click="go('/setup')">
             <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M5 3l14 9-14 9V3z" />
             </svg>
             {{ t('home.ctaInterview') }}
           </button>
-          <button class="btn-ghost w-full sm:w-auto" @click="go('/chat')">
+          <button class="btn-ghost w-full sm:w-auto min-h-[48px]" @click="go('/chat')">
             <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12a8 8 0 01-8 8H7l-4 3v-6a8 8 0 018-11h2a8 8 0 018 6z" />
             </svg>
             {{ t('home.ctaChat') }}
           </button>
         </div>
+      </div>
+    </section>
 
-        <!-- 数字人预览卡 -->
-        <div class="mx-auto mt-16 max-w-md animate-fade-up [animation-delay:0.2s]">
-          <div class="card flex items-center gap-4 !p-5">
-            <span class="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-brand text-white shadow-glow">
-              <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l5 5-5 5M12 8v8M8 10l-5 5 5 5" />
-              </svg>
-            </span>
-            <div class="text-left">
-              <p class="font-semibold text-gray-800">{{ t('nav.brand') }}</p>
-              <p class="text-sm text-gray-500">{{ t('home.heroBadge') }}</p>
-            </div>
+    <!-- 数字人形象选择（登录用户可见） -->
+    <section v-if="userStore.isLoggedIn" class="mx-auto max-w-5xl px-4 pb-16">
+      <div class="mb-6 text-center">
+        <h2 class="text-2xl font-bold text-gray-900 md:text-3xl">{{ t('home.avatarSectionTitle') }}</h2>
+        <p class="mt-2 text-gray-500">{{ t('home.avatarSectionSubtitle') }}</p>
+      </div>
+
+      <div v-if="loadingAvatars" class="text-center text-gray-400">{{ t('common.loading') }}</div>
+      <div v-else class="flex flex-wrap justify-center gap-4 md:gap-6">
+        <button
+          v-for="a in avatars"
+          :key="a.id ?? 'default'"
+          class="card group flex w-24 md:w-28 flex-col items-center gap-1.5 !p-2.5 md:!p-3 transition hover:-translate-y-1 hover:shadow-glow"
+          :class="{ 'ring-2 ring-primary-400': isSelected(a) }"
+          @click="selectAvatar(a)"
+        >
+          <div class="aspect-[9/16] w-full overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
+            <img
+              :src="a.avatarImage"
+              :alt="a.name"
+              class="h-full w-full object-cover transition group-hover:scale-105"
+              @error="($event) => { ($event.target as HTMLImageElement).style.display = 'none' }"
+            />
           </div>
-        </div>
+          <div class="avatar-name-wrapper w-full px-0.5 text-center">
+            <span class="text-xs md:text-sm font-medium text-gray-700 leading-tight break-words">{{ displayName(a) }}</span>
+          </div>
+          <span v-if="isSelected(a)" class="text-xs text-primary-600">{{ t('home.avatarCurrent') }}</span>
+          <span v-else class="text-xs text-gray-400">{{ t('home.avatarSelect') }}</span>
+        </button>
       </div>
     </section>
 
@@ -127,32 +164,14 @@ function go(path: string) {
       </div>
     </section>
 
-    <!-- 形象选择（仅登录用户可见） -->
-    <section v-if="userStore.isLoggedIn && avatars.length" class="mx-auto max-w-5xl px-4 pb-24">
-      <div class="mb-6 text-center">
-        <h2 class="text-2xl font-bold text-gray-900">选择你的面试官形象</h2>
-        <p class="mt-2 text-gray-500">从下方挑选一个数字人形象，将用于陪练与面试</p>
-      </div>
-      <div class="flex flex-wrap justify-center gap-4">
-        <button
-          v-for="a in avatars"
-          :key="a.id"
-          class="card flex w-40 flex-col items-center gap-3 !p-5 transition hover:-translate-y-1 hover:shadow-glow"
-          :class="{ 'ring-2 ring-primary-400': userStore.user?.preferredAvatarId === a.id }"
-          @click="selectAvatar(a.id)"
-        >
-          <span class="text-5xl">{{ a.extra?.emoji || '🙂' }}</span>
-          <span class="text-sm font-medium text-gray-700">{{ a.name }}</span>
-          <span v-if="userStore.user?.preferredAvatarId === a.id" class="text-xs text-primary-600">已选择</span>
-        </button>
-      </div>
-    </section>
-
     <!-- Footer -->
     <footer class="border-t border-primary-100/60 bg-white/50 backdrop-blur">
       <div class="mx-auto max-w-5xl px-4 py-8 text-center text-sm text-gray-400">
         {{ t('nav.brand') }} · {{ new Date().getFullYear() }}
       </div>
     </footer>
+
+    <!-- 新手引导 -->
+    <OnboardingGuide :show="showOnboarding" @finish="showOnboarding = false" />
   </div>
 </template>

@@ -99,3 +99,26 @@ def get_current_user(
     if not user:
         raise HTTPException(401, "用户不存在")
     return user
+
+
+def require_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """要求当前用户为管理员角色。"""
+    if current_user.role != "admin":
+        raise HTTPException(403, "需要管理员权限")
+    return current_user
+
+
+def get_optional_user(
+    authorization: Optional[str] = Header(None),
+    session: Session = Depends(get_session),
+) -> Optional[User]:
+    """可选认证：有 token 则返回用户，无 token 返回 None。"""
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    token = authorization.split(" ", 1)[1]
+    user_id = verify_user_token(token)
+    if user_id is None:
+        return None
+    return session.get(User, user_id)

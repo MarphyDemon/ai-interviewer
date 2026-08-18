@@ -15,7 +15,7 @@ os.environ["ANONYMIZED_TELEMETRY"] = "False"
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from server.database import init_db
-from server.routers import knowledge, resume, interview, report, admin, avatar, chat, jd, auth, code, files, recordings
+from server.routers import knowledge, resume, interview, report, admin, avatar, chat, jd, auth, code, files, recordings, settings
 
 app = FastAPI(title="AI Interviewer API", version="0.1.0")
 
@@ -28,6 +28,7 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(settings.router)
 app.include_router(knowledge.router)
 app.include_router(resume.router)
 app.include_router(interview.router)

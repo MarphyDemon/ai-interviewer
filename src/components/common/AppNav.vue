@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LangToggle from './LangToggle.vue'
+import NotificationCenter from './NotificationCenter.vue'
 import { useUserStore } from '@/stores/user'
 
 const { t } = useI18n()
@@ -10,13 +11,18 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const links = computed(() => [
-  { name: 'home', to: '/', label: t('nav.home') },
-  { name: 'chat', to: '/chat', label: t('nav.chat') },
-  { name: 'code', to: '/code', label: t('nav.codePractice') },
-  { name: 'history', to: '/history', label: t('nav.history') },
-  { name: 'admin', to: '/admin', label: t('nav.admin') },
-])
+const links = computed(() => {
+  const list = [
+    { name: 'home', to: '/', label: t('nav.home') },
+    { name: 'chat', to: '/chat', label: t('nav.chat') },
+    { name: 'code', to: '/code', label: t('nav.codePractice') },
+    { name: 'history', to: '/history', label: t('nav.history') },
+  ]
+  if (userStore.isAdmin) {
+    list.push({ name: 'admin', to: '/admin', label: t('nav.admin') })
+  }
+  return list
+})
 
 const mobileLinks = computed(() => links.value.filter(l => l.name !== 'code'))
 
@@ -62,6 +68,13 @@ function logout() {
       <div class="flex items-center gap-2">
         <template v-if="userStore.isLoggedIn">
           <span class="hidden text-sm text-gray-600 sm:inline">{{ userStore.user?.username }}</span>
+          <NotificationCenter />
+          <router-link to="/settings" class="btn-ghost !px-3 !py-2 text-sm" title="设置">
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+            </svg>
+          </router-link>
           <button class="btn-ghost !px-3 !py-2 text-sm" @click="logout">{{ t('nav.logout') }}</button>
         </template>
         <template v-else>

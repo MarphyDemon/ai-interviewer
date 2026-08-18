@@ -8,22 +8,41 @@ export const useChatStore = defineStore('chat', () => {
   const currentMessages = ref<ChatMessageItem[]>([])
   const currentId = ref<number | null>(null)
   const streaming = ref(false)
+  const conversationsLoading = ref(false)
+  const selectLoading = ref(false)
+  const removeLoading = ref<number | null>(null)
+  const newConversationLoading = ref(false)
   let abortController: AbortController | null = null
 
   async function fetchConversations() {
-    conversations.value = await chatApi.listConversations()
+    conversationsLoading.value = true
+    try {
+      conversations.value = await chatApi.listConversations()
+    } finally {
+      conversationsLoading.value = false
+    }
   }
 
   async function selectConversation(id: number) {
+    selectLoading.value = true
     currentId.value = id
-    currentMessages.value = await chatApi.getMessages(id)
+    try {
+      currentMessages.value = await chatApi.getMessages(id)
+    } finally {
+      selectLoading.value = false
+    }
   }
 
   async function newConversation(): Promise<number> {
-    const conv = await chatApi.createConversation()
-    conversations.value.unshift(conv)
-    await selectConversation(conv.id)
-    return conv.id
+    newConversationLoading.value = true
+    try {
+      const conv = await chatApi.createConversation()
+      conversations.value.unshift(conv)
+      await selectConversation(conv.id)
+      return conv.id
+    } finally {
+      newConversationLoading.value = false
+    }
   }
 
   async function rename(id: number, title: string) {
@@ -33,11 +52,16 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function remove(id: number) {
-    await chatApi.deleteConversation(id)
-    conversations.value = conversations.value.filter((c) => c.id !== id)
-    if (currentId.value === id) {
-      currentId.value = null
-      currentMessages.value = []
+    removeLoading.value = id
+    try {
+      await chatApi.deleteConversation(id)
+      conversations.value = conversations.value.filter((c) => c.id !== id)
+      if (currentId.value === id) {
+        currentId.value = null
+        currentMessages.value = []
+      }
+    } finally {
+      removeLoading.value = null
     }
   }
 
@@ -108,6 +132,10 @@ export const useChatStore = defineStore('chat', () => {
     currentMessages,
     currentId,
     streaming,
+    conversationsLoading,
+    selectLoading,
+    removeLoading,
+    newConversationLoading,
     fetchConversations,
     selectConversation,
     newConversation,

@@ -41,3 +41,6 @@ nul
 
 # Logs
 *.log
+
+# Sensitive docs (contains account info)
+docs/数据存储与账号信息.md

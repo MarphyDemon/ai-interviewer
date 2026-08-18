@@ -9,42 +9,70 @@ engine = create_engine(
 
 
 def _run_migrations():
-    """幂等地为已存在的表补列（SQLite ALTER TABLE ADD COLUMN，列已存在时忽略报错）。"""
+    """幂等地为已存在的表补列。"""
     import sqlite3
-    if "sqlite" not in settings.database_url:
-        return
-    db_path = settings.database_url.replace("sqlite:///", "")
-    if not db_path:
-        return
-    migrations = [
+    is_sqlite = "sqlite" in settings.database_url
+    is_postgres = "postgresql" in settings.database_url
+
+    migrations_sqlite = [
         ("interview", "jd_id", "INTEGER"),
         ("report", "match_score", "REAL"),
         ("report", "match_breakdown", "TEXT"),
-        # P2 用户体系：为已存在的 user 表补 username/password_hash/preferred_avatar_id
         ("user", "username", "TEXT"),
         ("user", "password_hash", "TEXT"),
         ("user", "preferred_avatar_id", "INTEGER"),
-        # P2 知识文档：补 is_public（混合 public/private）
+        ("user", "preferred_avatar_config_id", "INTEGER"),
         ("knowledgedoc", "is_public", "INTEGER"),
         ("report", "share_token", "TEXT"),
         ("report", "share_expires_at", "DATETIME"),
+        ("avatarproviderconfig", "avatar_image", "TEXT DEFAULT ''"),
+        ("user", "role", "TEXT DEFAULT 'user'"),
+        ("user", "preferred_position", "TEXT DEFAULT ''"),
+        ("user", "language", "TEXT DEFAULT 'zh'"),
+        ("user", "theme", "TEXT DEFAULT 'light'"),
+        ("user", "notification_settings", "TEXT DEFAULT '{}'"),
     ]
-    conn = sqlite3.connect(db_path)
-    try:
-        for table, column, col_type in migrations:
-            cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-            if column not in cols:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
-        # 兼容旧数据：knowledgedoc.is_public 新列默认 NULL，更新为 0（private）
+    migrations_postgres = [
+        ("avatarproviderconfig", "avatar_image", "VARCHAR DEFAULT ''"),
+        ("user", "preferred_avatar_config_id", "INTEGER"),
+        ("user", "role", "VARCHAR DEFAULT 'user'"),
+        ("user", "preferred_position", "VARCHAR DEFAULT ''"),
+        ("user", "language", "VARCHAR DEFAULT 'zh'"),
+        ("user", "theme", "VARCHAR DEFAULT 'light'"),
+        ("user", "notification_settings", "VARCHAR DEFAULT '{}'"),
+    ]
+
+    if is_sqlite:
+        db_path = settings.database_url.replace("sqlite:///", "")
+        if not db_path:
+            return
+        conn = sqlite3.connect(db_path)
         try:
-            conn.execute("UPDATE knowledgedoc SET is_public = 0 WHERE is_public IS NULL")
-        except Exception:
-            pass
-        conn.commit()
-    except Exception as e:
-        print(f"[migration] skipped: {e}")
-    finally:
-        conn.close()
+            for table, column, col_type in migrations_sqlite:
+                cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+                if column not in cols:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+            try:
+                conn.execute("UPDATE knowledgedoc SET is_public = 0 WHERE is_public IS NULL")
+            except Exception:
+                pass
+            conn.commit()
+        except Exception as e:
+            print(f"[migration] skipped: {e}")
+        finally:
+            conn.close()
+    elif is_postgres:
+        with engine.connect() as conn:
+            for table, column, col_type in migrations_postgres:
+                result = conn.execute(
+                    text("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = :table AND column_name = :col"),
+                    {"table": table, "col": column}
+                )
+                if result.scalar() == 0:
+                    quoted_table = f'"{table}"'
+                    conn.execute(text(f"ALTER TABLE {quoted_table} ADD COLUMN {column} {col_type}"))
+                    print(f"[migration] added {column} to {table}")
+            conn.commit()
 
 
 def init_db():
@@ -52,21 +80,13 @@ def init_db():
     _run_migrations()
     _seed_avatars()
     _seed_algorithm_problems()
+    _seed_knowledge_versions()
+    _seed_user_quotas()
 
 
 def _seed_avatars():
-    """预置占位数字人形象（2D，资源后补）。仅首次启动且表为空时写入。"""
-    from server.models import Avatar
-    with Session(engine) as session:
-        if session.exec(select(Avatar)).first():
-            return
-        defaults = [
-            Avatar(name="默认面试官", cover_url="", extra='{"emoji":"😊","color":"primary"}'),
-            Avatar(name="专业面试官", cover_url="", extra='{"emoji":"🧑‍💼","color":"blue"}'),
-        ]
-        for a in defaults:
-            session.add(a)
-        session.commit()
+    """不再预置 Avatar 表数据。数字人形象由 AvatarProviderConfig 管理。"""
+    pass
 
 
 def get_session():
@@ -120,4 +140,47 @@ def _seed_algorithm_problems():
         ]
         for p in defaults:
             session.add(p)
+        session.commit()
+
+
+def _seed_knowledge_versions():
+    """为现有知识库文档创建初始版本快照（一次性迁移，幂等）。"""
+    from server.models import KnowledgeDoc, KnowledgeVersion
+    with Session(engine) as session:
+        docs = session.exec(select(KnowledgeDoc)).all()
+        for doc in docs:
+            existing = session.exec(
+                select(KnowledgeVersion).where(KnowledgeVersion.doc_id == doc.id)
+            ).first()
+            if existing:
+                continue
+            import json as _json
+            ver = KnowledgeVersion(
+                doc_id=doc.id,
+                version_number=1,
+                content=doc.content,
+                title=doc.title,
+                position=doc.position,
+                difficulty=doc.difficulty,
+                tags=doc.tags,
+                change_note="初始版本",
+                created_by=doc.user_id,
+            )
+            session.add(ver)
+        session.commit()
+
+
+def _seed_user_quotas():
+    """为没有配额记录的用户创建默认配额（幂等）。"""
+    from server.models import User, UserQuota
+    with Session(engine) as session:
+        users = session.exec(select(User)).all()
+        for user in users:
+            existing = session.exec(
+                select(UserQuota).where(UserQuota.user_id == user.id)
+            ).first()
+            if existing:
+                continue
+            quota = UserQuota(user_id=user.id)
+            session.add(quota)
         session.commit()

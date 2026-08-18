@@ -79,9 +79,22 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/profile',
+      name: 'profile',
+      component: () => import('@/views/ProfileView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/views/SettingsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/admin',
       name: 'admin',
       component: () => import('@/views/AdminView.vue'),
+      meta: { requiresAuth: true, requiresAdmin: true },
     },
   ],
 })
@@ -89,13 +102,14 @@ const router = createRouter({
 // 路由守卫：数据路由需登录，分享报告（带 token query）公开访问
 router.beforeEach((to) => {
   if (to.meta.requiresAuth) {
-    // 分享报告通过 token query 公开访问
     if (to.name === 'report' && to.query.token) return true
     const userStore = useUserStore()
     if (!userStore.isLoggedIn) {
       return { path: '/login', query: { redirect: to.fullPath } }
     }
   }
+  // 管理页允许已登录用户访问，密码验证由 AdminView 组件内部处理
+  // 管理员角色用户可跳过密码验证
 })
 
 export default router

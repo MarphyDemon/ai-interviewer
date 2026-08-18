@@ -11,7 +11,7 @@ const tabs = [
   { path: '/chat', label: '聊天', icon: '🤖' },
   { path: '/setup', label: '面试', icon: '💬' },
   { path: '/history', label: '历史', icon: '📋' },
-  { path: userStore.isLoggedIn ? '/admin' : '/login', label: userStore.isLoggedIn ? '我的' : '登录', icon: '👤' },
+  { path: userStore.isLoggedIn ? '/profile' : '/login', label: userStore.isLoggedIn ? '我的' : '登录', icon: '👤' },
 ]
 
 const navigate = (path: string) => {
@@ -22,8 +22,8 @@ const navigate = (path: string) => {
 <template>
   <nav
     class="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur border-t border-gray-200
-           flex justify-around items-center safe-area-bottom shadow-[0_-2px_10px_rgba(0,0,0,0.05)]"
-    style="min-height: 56px;"
+           flex justify-around items-center shadow-[0_-2px_10px_rgba(0,0,0,0.05)]"
+    style="padding-bottom: env(safe-area-inset-bottom); min-height: 56px;"
   >
     <button
       v-for="tab in tabs"

@@ -13,16 +13,31 @@ function getApiBaseURL(): string {
   return '/api'
 }
 
+async function getToken(url: string): Promise<string | null> {
+  const isAdminUrl = url.startsWith('/admin')
+  const tokenKey = isAdminUrl ? 'admin_token' : 'user_token'
+  const host = detectHost()
+
+  if (host === 'capacitor') {
+    try {
+      const { Preferences } = await import('@capacitor/preferences')
+      const { value } = await Preferences.get({ key: tokenKey })
+      return value
+    } catch {
+      // Fall back to localStorage
+    }
+  }
+  return localStorage.getItem(tokenKey)
+}
+
 const client = axios.create({
   baseURL: getApiBaseURL(),
   timeout: 30000,
 })
 
-client.interceptors.request.use((config) => {
+client.interceptors.request.use(async (config) => {
   const url = config.url || ''
-  const token = url.startsWith('/admin')
-    ? localStorage.getItem('admin_token')
-    : localStorage.getItem('user_token')
+  const token = await getToken(url)
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }

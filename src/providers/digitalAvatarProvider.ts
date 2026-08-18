@@ -24,20 +24,57 @@ export class DigitalAvatarProvider implements AvatarProvider {
       containerId,
       container,
       appId: this.config.appId,
-      "asr_id": 2,
       "features": {
-          "anti_interference": {
-              "semantic_judge_enabled": false
-          },
-          "speech_frontend": {
-              "enabled": false,
-              "enable_aec": false,
-              "enable_speech_separation": false
-          },
-          "vad_merge_mode": true,
-          "volume_and_repetition_text_detection": true
+        "anti_interference": {
+          "semantic_judge_enabled": false
+        },
+        "speech_frontend": {
+          "enabled": false,
+          "enable_aec": false,
+          "enable_speech_separation": false
+        },
+        "vad_merge_mode": true,
+        "volume_and_repetition_text_detection": true
       },
-      "llm_id": 2,
+      "asr_config": {
+        "provider": "doubao",
+        "base_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async",
+        "headers": {
+          "resource_id": "volc.bigasr.sauc.duration",
+          "access_token": "pWWHUQiZ7HzuwkFyOt9DjXYNaDFtpJLh",
+          "app_id": "6220573154"
+        },
+        "request": {
+          "enable_ddc": false,
+          "enable_itn": true,
+          "model_name": "bigmodel",
+          "enable_punc": true,
+          "result_type": "full",
+          "model_version": "400",
+          "end_window_size": 200,
+          "show_utterances": true,
+          "force_to_speech_time": 1000
+        }
+      },
+      "brain_config": {
+        "provider": "doubao",
+        "model": "ep-20260326184144-bln7r",
+        "api_key": "669350ba-bc3b-4802-b252-f6213b9433bc",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3"
+      },
+      config: {
+        init_events: [
+          {
+            "axis_id": 100,
+            "height": 1,
+            "image": "https://media.xingyun3d.com/test_0820/20250820-102325.png",
+            "type": "SetCharacterCanvasAnchor",
+            "width": 1,
+            "x_location": 0,
+            "y_location": 0
+          }
+        ]
+      },
       appSecret: this.config.appSecret,
       gatewayServer: this.config.gatewayServer,
       onMessage: (error) => {
@@ -93,20 +130,20 @@ export class DigitalAvatarProvider implements AvatarProvider {
     if (!this.agent || !text.trim()) return
     const isStart = !this.speakStreamStarted
     this.speakStreamStarted = true
-    // 镜像 speakByE2E 内部 sendControl，但用自定义 is_start/is_end 分帧
-    ;(this.agent as any).sendControl({
-      type: 'speak',
-      message: { text, is_start: isStart, is_end: false },
-    })
+      // 镜像 speakByE2E 内部 sendControl，但用自定义 is_start/is_end 分帧
+      ; (this.agent as any).sendControl({
+        type: 'speak',
+        message: { text, is_start: isStart, is_end: false },
+      })
   }
 
   endSpeakStream(text: string): void {
     if (!this.agent) return
     const isStart = !this.speakStreamStarted
-    ;(this.agent as any).sendControl({
-      type: 'speak',
-      message: { text: text || '', is_start: isStart, is_end: true },
-    })
+      ; (this.agent as any).sendControl({
+        type: 'speak',
+        message: { text: text || '', is_start: isStart, is_end: true },
+      })
     this.speakStreamStarted = false
   }
 

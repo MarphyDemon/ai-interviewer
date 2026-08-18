@@ -1,13 +1,50 @@
 import json
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session, select, or_
 from server.database import get_session
-from server.models import KnowledgeDoc, User
+from server.models import KnowledgeDoc, KnowledgeVersion, KnowledgeEditLock, KnowledgeCollaborator, User
 from server.services.knowledge_service import process_knowledge_doc, delete_knowledge
-from server.services.auth_service import get_current_user
+from server.services.auth_service import get_current_user, require_admin
 import asyncio
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+
+
+class CreateVersionRequest(BaseModel):
+    changeNote: str = ""
+
+
+class RollbackRequest(BaseModel):
+    pass
+
+
+class CollaboratorRequest(BaseModel):
+    userId: int
+    permission: str = "read"  # read / edit / admin
+
+
+class LockResponse(BaseModel):
+    locked: bool = True
+    lockId: int | None = None
+
+
+def _get_doc_or_404(session: Session, doc_id: int, user: User) -> KnowledgeDoc:
+    doc = session.get(KnowledgeDoc, doc_id)
+    if not doc:
+        raise HTTPException(404, "文档不存在")
+    if doc.user_id != user.id and not doc.is_public:
+        # Check collaborator permissions
+        collab = session.exec(
+            select(KnowledgeCollaborator).where(
+                KnowledgeCollaborator.doc_id == doc_id,
+                KnowledgeCollaborator.user_id == user.id,
+            )
+        ).first()
+        if not collab:
+            raise HTTPException(403, "无权限访问此文档")
+    return doc
 
 
 @router.post("/upload")
@@ -121,4 +158,283 @@ async def delete_doc(doc_id: int, session: Session = Depends(get_session), user:
     if not doc or doc.user_id != user.id:
         raise HTTPException(404, "Document not found")
     delete_knowledge(session, doc_id)
+    return {"ok": True}
+
+
+# ---------- 版本管理（P1 新增） ----------
+
+@router.get("/{doc_id}/versions")
+async def list_versions(
+    doc_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    doc = _get_doc_or_404(session, doc_id, user)
+    versions = session.exec(
+        select(KnowledgeVersion)
+        .where(KnowledgeVersion.doc_id == doc_id)
+        .order_by(KnowledgeVersion.version_number.desc())
+    ).all()
+    return [
+        {
+            "id": v.id,
+            "versionNumber": v.version_number,
+            "title": v.title,
+            "changeNote": v.change_note,
+            "createdBy": v.created_by,
+            "createdAt": v.created_at.isoformat() if v.created_at else None,
+        }
+        for v in versions
+    ]
+
+
+@router.get("/{doc_id}/versions/{version_id}")
+async def get_version(
+    doc_id: int,
+    version_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    doc = _get_doc_or_404(session, doc_id, user)
+    version = session.get(KnowledgeVersion, version_id)
+    if not version or version.doc_id != doc_id:
+        raise HTTPException(404, "版本不存在")
+    return {
+        "id": version.id,
+        "versionNumber": version.version_number,
+        "content": version.content,
+        "title": version.title,
+        "position": version.position,
+        "difficulty": version.difficulty,
+        "tags": json.loads(version.tags) if version.tags else [],
+        "changeNote": version.change_note,
+        "createdBy": version.created_by,
+        "createdAt": version.created_at.isoformat() if version.created_at else None,
+    }
+
+
+@router.post("/{doc_id}/versions")
+async def create_version(
+    doc_id: int,
+    req: CreateVersionRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    doc = _get_doc_or_404(session, doc_id, user)
+    if doc.user_id != user.id:
+        raise HTTPException(403, "只有文档所有者可创建手动版本")
+    existing = session.exec(
+        select(KnowledgeVersion).where(KnowledgeVersion.doc_id == doc_id)
+    ).all()
+    next_version = max((v.version_number for v in existing), default=0) + 1
+    ver = KnowledgeVersion(
+        doc_id=doc_id,
+        version_number=next_version,
+        content=doc.content,
+        title=doc.title,
+        position=doc.position,
+        difficulty=doc.difficulty,
+        tags=doc.tags,
+        change_note=req.changeNote or f"手动保存 v{next_version}",
+        created_by=user.id,
+    )
+    session.add(ver)
+    session.commit()
+    session.refresh(ver)
+    return {"id": ver.id, "versionNumber": ver.version_number}
+
+
+@router.post("/{doc_id}/versions/{version_id}/rollback")
+async def rollback_version(
+    doc_id: int,
+    version_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    doc = _get_doc_or_404(session, doc_id, user)
+    if doc.user_id != user.id:
+        raise HTTPException(403, "只有文档所有者可回滚")
+    version = session.get(KnowledgeVersion, version_id)
+    if not version or version.doc_id != doc_id:
+        raise HTTPException(404, "版本不存在")
+
+    # 创建当前版本快照（回滚前先保存当前状态）
+    existing = session.exec(
+        select(KnowledgeVersion).where(KnowledgeVersion.doc_id == doc_id)
+    ).all()
+    snapshot_version = max((v.version_number for v in existing), default=0) + 1
+    snapshot = KnowledgeVersion(
+        doc_id=doc_id,
+        version_number=snapshot_version,
+        content=doc.content,
+        title=doc.title,
+        position=doc.position,
+        difficulty=doc.difficulty,
+        tags=doc.tags,
+        change_note=f"回滚前自动快照（回滚到 v{version.version_number}）",
+        created_by=user.id,
+    )
+    session.add(snapshot)
+
+    # 回滚文档内容
+    doc.content = version.content
+    doc.title = version.title
+    doc.position = version.position
+    doc.difficulty = version.difficulty
+    doc.tags = version.tags
+    doc.status = "processing"
+    session.add(doc)
+    session.commit()
+
+    # 重新索引
+    asyncio.create_task(process_knowledge_doc_async(doc_id))
+    return {"ok": True, "newVersion": snapshot_version}
+
+
+@router.delete("/{doc_id}/versions/{version_id}")
+async def delete_version(
+    doc_id: int,
+    version_id: int,
+    session: Session = Depends(get_session),
+    admin_user: User = Depends(require_admin),
+):
+    version = session.get(KnowledgeVersion, version_id)
+    if not version or version.doc_id != doc_id:
+        raise HTTPException(404, "版本不存在")
+    session.delete(version)
+    session.commit()
+    return {"ok": True}
+
+
+# ---------- 协作锁（P1-2 新增） ----------
+
+@router.post("/{doc_id}/lock")
+async def acquire_lock(
+    doc_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    doc = _get_doc_or_404(session, doc_id, user)
+    # 检查现有锁
+    existing_lock = session.exec(
+        select(KnowledgeEditLock).where(KnowledgeEditLock.doc_id == doc_id)
+    ).first()
+    if existing_lock:
+        if existing_lock.user_id == user.id:
+            # 续租
+            existing_lock.expires_at = datetime.utcnow() + timedelta(minutes=30)
+            session.add(existing_lock)
+            session.commit()
+            return {"locked": True, "lockId": existing_lock.id}
+        if existing_lock.expires_at > datetime.utcnow():
+            # 锁仍有效
+            lock_owner = session.get(User, existing_lock.user_id)
+            owner_name = lock_owner.username if lock_owner else "未知用户"
+            raise HTTPException(409, f"文档正在被 {owner_name} 编辑，请稍后再试")
+        # 锁已过期，抢占
+        session.delete(existing_lock)
+
+    # 创建新锁
+    lock = KnowledgeEditLock(
+        doc_id=doc_id,
+        user_id=user.id,
+        expires_at=datetime.utcnow() + timedelta(minutes=30),
+    )
+    session.add(lock)
+    session.commit()
+    session.refresh(lock)
+    return {"locked": True, "lockId": lock.id}
+
+
+@router.post("/{doc_id}/unlock")
+async def release_lock(
+    doc_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    lock = session.exec(
+        select(KnowledgeEditLock).where(KnowledgeEditLock.doc_id == doc_id)
+    ).first()
+    if not lock:
+        return {"ok": True}
+    if lock.user_id != user.id:
+        raise HTTPException(403, "不是锁的持有者")
+    session.delete(lock)
+    session.commit()
+    return {"ok": True}
+
+
+# ---------- 协作者管理（P1-2 新增） ----------
+
+@router.get("/{doc_id}/collaborators")
+async def list_collaborators(
+    doc_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    doc = _get_doc_or_404(session, doc_id, user)
+    collabs = session.exec(
+        select(KnowledgeCollaborator).where(KnowledgeCollaborator.doc_id == doc_id)
+    ).all()
+    results = []
+    for c in collabs:
+        u = session.get(User, c.user_id)
+        results.append({
+            "id": c.id,
+            "userId": c.user_id,
+            "username": u.username if u else "未知用户",
+            "permission": c.permission,
+            "createdAt": c.created_at.isoformat() if c.created_at else None,
+        })
+    return results
+
+
+@router.post("/{doc_id}/collaborators")
+async def add_collaborator(
+    doc_id: int,
+    req: CollaboratorRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    doc = _get_doc_or_404(session, doc_id, user)
+    if doc.user_id != user.id:
+        raise HTTPException(403, "只有文档所有者可添加协作者")
+    if req.permission not in ("read", "edit", "admin"):
+        raise HTTPException(400, "无效的权限类型")
+    # 检查是否已存在
+    existing = session.exec(
+        select(KnowledgeCollaborator).where(
+            KnowledgeCollaborator.doc_id == doc_id,
+            KnowledgeCollaborator.user_id == req.userId,
+        )
+    ).first()
+    if existing:
+        existing.permission = req.permission
+        session.add(existing)
+    else:
+        collab = KnowledgeCollaborator(
+            doc_id=doc_id,
+            user_id=req.userId,
+            permission=req.permission,
+        )
+        session.add(collab)
+    session.commit()
+    return {"ok": True}
+
+
+@router.delete("/{doc_id}/collaborators/{collab_id}")
+async def remove_collaborator(
+    doc_id: int,
+    collab_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    doc = _get_doc_or_404(session, doc_id, user)
+    if doc.user_id != user.id:
+        raise HTTPException(403, "只有文档所有者可移除协作者")
+    collab = session.get(KnowledgeCollaborator, collab_id)
+    if not collab or collab.doc_id != doc_id:
+        raise HTTPException(404, "协作者不存在")
+    session.delete(collab)
+    session.commit()
     return {"ok": True}

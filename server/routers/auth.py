@@ -83,10 +83,22 @@ async def me(user: User = Depends(get_current_user)):
 
 
 def _format_user(user: User) -> dict:
+    import json as _json
+    notif = {}
+    if user.notification_settings:
+        try:
+            notif = _json.loads(user.notification_settings)
+        except Exception:
+            notif = {}
     return {
         "id": user.id,
         "username": user.username,
-        "preferredAvatarId": user.preferred_avatar_id,
+        "role": user.role,
+        "preferredAvatarConfigId": user.preferred_avatar_config_id,
+        "preferredPosition": user.preferred_position,
+        "language": user.language,
+        "theme": user.theme,
+        "notificationSettings": notif,
     }
 
 

@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { useInterviewStore } from '@/stores/interview'
 import { useAvatar } from '@/composables/useAvatar'
+import { useDevice } from '@/composables/useDevice'
 import { useMediaRecorder } from '@/composables/useMediaRecorder'
 import { WebSpeechAsrProvider } from '@/providers/webSpeechAsrProvider'
 import { getLanguages, type LanguageItem } from '@/api/code'
@@ -16,6 +17,7 @@ const { t } = useI18n()
 const router = useRouter()
 const store = useInterviewStore()
 const { initAvatar, getProvider, destroyAvatar, isDigital } = useAvatar()
+const { isMobile, isLandscape } = useDevice()
 
 const chatPanel = ref<HTMLElement | null>(null)
 const textInput = ref('')
@@ -298,32 +300,37 @@ function scrollToBottom() {
   <div class="flex h-screen flex-col bg-gray-50">
     <div class="flex items-center justify-between border-b bg-white px-4 py-3">
       <div>
-        <p class="font-semibold text-gray-800">
+        <p class="font-semibold text-gray-800 text-sm md:text-base">
           {{ store.config ? t('positions.' + store.config.position, store.config.position) : '' }} ·
           {{ store.config ? t('difficulty.' + store.config.difficulty, store.config.difficulty) : '' }}
         </p>
-        <p class="text-xs text-gray-400">{{ store.config?.style ? t('styles.' + store.config.style, store.config.style) : '' }}</p>
+        <p class="text-xs text-gray-400 hidden md:block">{{ store.config?.style ? t('styles.' + store.config.style, store.config.style) : '' }}</p>
       </div>
-      <div class="flex items-center gap-4">
-        <div class="text-lg font-mono" :class="store.remainingTime < 60 ? 'text-red-500' : 'text-gray-600'">
+      <div class="flex items-center gap-3 md:gap-4">
+        <div class="text-base md:text-lg font-mono" :class="store.remainingTime < 60 ? 'text-red-500' : 'text-gray-600'">
           {{ remainingDisplay }}
         </div>
         <button
           @click="handleEnd"
           :disabled="isEnding || store.state === 'generating_report'"
-          class="rounded-lg bg-red-500 px-4 py-2 text-sm text-white hover:bg-red-600 disabled:opacity-50"
+          class="rounded-lg bg-red-500 px-3 md:px-4 py-2 text-xs md:text-sm text-white hover:bg-red-600 disabled:opacity-50 min-h-[44px]"
         >
           {{ isEnding ? t('interview.ending') : t('interview.endInterview') }}
         </button>
       </div>
     </div>
 
-    <div class="flex flex-1 overflow-hidden flex-col md:flex-row">
-      <div class="h-48 md:h-full md:w-2/5 flex-shrink-0 border-r" :id="avatarContainerId">
-        <div v-if="initializing" class="flex h-full items-center justify-center text-gray-400">
-          <div class="text-center">
-            <div class="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600"></div>
-            <p class="text-sm">{{ t('interview.avatarInit') }}</p>
+    <div class="flex flex-1 overflow-hidden flex-col md:flex-row" :class="{ 'md:flex-row': isMobile && isLandscape }">
+      <div class="flex h-40 md:h-full md:w-2/5 flex-shrink-0 flex-col items-center justify-center border-b md:border-b-0 md:border-r p-2" :class="{ 'md:w-1/3': isMobile && isLandscape }">
+        <div
+          class="avatar-stage relative max-h-full w-full overflow-hidden rounded-2xl border border-primary-100/60 bg-gradient-brand-soft"
+          :id="avatarContainerId"
+        >
+          <div v-if="initializing" class="flex h-full items-center justify-center text-gray-400">
+            <div class="text-center">
+              <div class="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600"></div>
+              <p class="text-sm">{{ t('interview.avatarInit') }}</p>
+            </div>
           </div>
         </div>
       </div>
@@ -361,7 +368,7 @@ function scrollToBottom() {
           </div>
         </div>
 
-        <div class="border-t bg-white p-4">
+        <div class="border-t bg-white p-3 md:p-4 safe-area-bottom">
           <!-- 算法题代码编辑器面板 -->
           <div v-if="store.currentProblem" class="mb-3 rounded-lg border border-primary-200 bg-primary-50/30">
             <div class="flex items-center justify-between border-b border-primary-100 px-3 py-2">
@@ -388,7 +395,7 @@ function scrollToBottom() {
                   {{ codeSubmitting ? '判定中...' : '提交代码' }}
                 </button>
               </div>
-              <div class="h-48 overflow-hidden rounded border border-gray-200">
+              <div class="h-40 md:h-48 overflow-hidden rounded border border-gray-200">
                 <VueMonacoEditor :value="codeValue" :language="monacoLangMap[codeLang] || 'plaintext'" theme="vs"
                   :options="{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, automaticLayout: true }"
                   @update:value="(val: string) => (codeValue = val)" />
@@ -409,12 +416,12 @@ function scrollToBottom() {
             <span v-else-if="asrResults">{{ asrResults }}</span>
           </div>
 
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
             <!-- 录制开关 -->
             <button
               v-if="!recordingEnabled"
               @click="recordingEnabled = true; startRecorder()"
-              class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
+              class="rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm text-gray-600 hover:bg-gray-100 min-h-[44px]"
               :title="t('interview.record')"
             >
               <svg viewBox="0 0 24 24" class="h-4 w-4 inline" fill="currentColor"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>
@@ -423,7 +430,7 @@ function scrollToBottom() {
             <button
               v-else
               @click="recordingEnabled = false; stopRecorder(); flushRecorder()"
-              class="rounded-lg border border-red-300 px-3 py-2 text-sm text-red-600 hover:bg-red-100"
+              class="rounded-lg border border-red-300 px-3 py-2 text-xs md:text-sm text-red-600 hover:bg-red-100 min-h-[44px]"
             >
               <svg viewBox="0 0 24 24" class="h-4 w-4 inline" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>
               {{ isRecorderOn ? '录制中 ' + Math.floor(recorderDuration / 1000) + 's' : '停止录制' }}
@@ -431,7 +438,7 @@ function scrollToBottom() {
 
             <button
               @click="inputMode = inputMode === 'voice' ? 'text' : 'voice'"
-              class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
+              class="rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm text-gray-600 hover:bg-gray-100 min-h-[44px]"
             >
               {{ inputMode === 'voice' ? t('interview.textMode') : t('interview.voiceMode') }}
             </button>
@@ -441,14 +448,14 @@ function scrollToBottom() {
                 v-if="!isListening"
                 @click="startVoice"
                 :disabled="store.state !== 'waiting_answer'"
-                class="flex-1 rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50"
+                class="flex-1 rounded-lg bg-primary-600 px-3 md:px-4 py-2 text-xs md:text-sm text-white hover:bg-primary-700 disabled:opacity-50 min-h-[44px]"
               >
                 {{ t('interview.startAnswer') }}
               </button>
               <button
                 v-else
                 @click="stopVoice"
-                class="flex-1 rounded-lg bg-red-500 px-4 py-2 text-sm text-white hover:bg-red-600"
+                class="flex-1 rounded-lg bg-red-500 px-3 md:px-4 py-2 text-xs md:text-sm text-white hover:bg-red-600 min-h-[44px]"
               >
                 {{ t('interview.submitAnswer') }}
               </button>
@@ -460,12 +467,12 @@ function scrollToBottom() {
                 @keydown.enter="submitText"
                 :disabled="store.state !== 'waiting_answer'"
                 :placeholder="t('interview.inputPlaceholder')"
-                class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none"
+                class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm focus:border-primary-500 focus:outline-none min-h-[44px]"
               />
               <button
                 @click="submitText"
                 :disabled="!textInput.trim() || store.state !== 'waiting_answer'"
-                class="rounded-lg bg-primary-600 px-4 py-2 text-sm text-white hover:bg-primary-700 disabled:opacity-50"
+                class="rounded-lg bg-primary-600 px-3 md:px-4 py-2 text-xs md:text-sm text-white hover:bg-primary-700 disabled:opacity-50 min-h-[44px]"
               >
                 {{ t('common.send') }}
               </button>
@@ -473,7 +480,7 @@ function scrollToBottom() {
 
             <button
               @click="handleInterrupt"
-              class="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
+              class="rounded-lg border border-gray-300 px-3 py-2 text-xs md:text-sm text-gray-600 hover:bg-gray-100 min-h-[44px]"
             >
               {{ t('common.interrupt') }}
             </button>
@@ -485,7 +492,7 @@ function scrollToBottom() {
     <!-- 右下角摄像头 PiP 小窗 -->
     <div
       v-if="cameraEnabled"
-      class="fixed bottom-4 right-4 z-30 overflow-hidden rounded-xl border border-white/30 bg-black shadow-xl"
+      class="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] md:bottom-4 right-4 z-30 overflow-hidden rounded-xl border border-white/30 bg-black shadow-xl"
     >
       <video
         v-show="!cameraCollapsed"

@@ -80,14 +80,14 @@ async function handleBatchDelete() {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl px-4 py-10">
-      <div class="mb-6 flex items-center justify-between">
-        <h1 class="text-2xl font-bold text-gray-900">{{ t('history.title') }}</h1>
+  <div class="mx-auto max-w-3xl px-4 py-4 md:py-10">
+      <div class="mb-4 md:mb-6 flex items-center justify-between">
+        <h1 class="text-xl md:text-2xl font-bold text-gray-900">{{ t('history.title') }}</h1>
         <button
           v-if="selectedIds.size > 0"
           @click="handleBatchDelete"
           :disabled="deleting"
-          class="rounded-lg bg-red-500 px-4 py-2 text-sm text-white hover:bg-red-600 disabled:opacity-50"
+          class="rounded-lg bg-red-500 px-4 py-2 text-sm text-white min-h-[40px] transition hover:bg-red-600 disabled:opacity-50"
         >
           {{ t('history.deleteSelected') }} ({{ selectedIds.size }})
         </button>
@@ -103,7 +103,7 @@ async function handleBatchDelete() {
             type="checkbox"
             :checked="allSelected"
             @change="toggleSelectAll"
-            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            class="h-5 w-5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
           />
           <span class="text-sm text-gray-500">{{ t('history.selectAll') }}</span>
         </div>
@@ -112,57 +112,67 @@ async function handleBatchDelete() {
           <div
             v-for="record in records"
             :key="record.id"
-            class="flex items-center gap-3 rounded-lg bg-white p-4 shadow-sm hover:shadow-md transition"
+            class="rounded-xl bg-white p-4 shadow-sm transition hover:shadow-md"
           >
-            <input
-              type="checkbox"
-              :checked="selectedIds.has(record.id)"
-              @change="toggleSelect(record.id)"
-              @click.stop
-              class="h-4 w-4 flex-shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-            />
+            <div class="flex items-start gap-3">
+              <input
+                type="checkbox"
+                :checked="selectedIds.has(record.id)"
+                @change="toggleSelect(record.id)"
+                @click.stop
+                class="mt-1 h-5 w-5 flex-shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              />
 
-            <div
-              class="flex flex-1 cursor-pointer items-center justify-between"
-              @click="router.push(`/report/${record.id}`)"
-            >
-              <div>
-                <p class="font-medium text-gray-800">
-                  {{ t('positions.' + record.position, record.position) }} ·
-                  {{ t('difficulty.' + record.difficulty, record.difficulty) }}
-                </p>
-                <p class="text-xs text-gray-400">
-                  {{ record.startedAt }}
-                  <span v-if="record.endedAt"> → {{ record.endedAt }}</span>
-                </p>
-              </div>
-              <div class="flex items-center gap-2">
-                <!-- 回放入口 -->
-                <button
-                  @click.stop="router.push(`/interview/${record.id}/playback`)"
-                  class="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
-                >
-                  <svg viewBox="0 0 24 24" class="mr-1 inline h-3.5 w-3.5" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                  回放
-                </button>
-                <span class="text-sm text-gray-500">{{ record.duration }} {{ t('history.minutes') }}</span>
-                <span
-                  :class="[
-                    'rounded-full px-2 py-1 text-xs',
-                    record.status === '已结束'
-                      ? 'bg-green-100 text-green-700'
-                      : 'bg-yellow-100 text-yellow-700',
-                  ]"
-                >
-                  {{ record.status === '已结束' ? t('history.completed') : t('history.inProgress') }}
-                </span>
-                <button
-                  @click.stop="handleDelete(record.id)"
-                  :disabled="deleting"
-                  class="text-sm text-red-400 hover:text-red-600 disabled:opacity-50"
-                >
-                  {{ t('common.delete') }}
-                </button>
+              <div
+                class="flex flex-1 cursor-pointer flex-col gap-3"
+                @click="router.push(`/report/${record.id}`)"
+              >
+                <div class="flex items-start justify-between gap-2">
+                  <div class="flex-1 min-w-0">
+                    <p class="font-medium text-gray-800 text-sm md:text-base">
+                      {{ t('positions.' + record.position, record.position) }} ·
+                      {{ t('difficulty.' + record.difficulty, record.difficulty) }}
+                    </p>
+                    <p class="text-xs text-gray-400 mt-0.5">
+                      {{ record.startedAt }}
+                      <span v-if="record.endedAt"> → {{ record.endedAt }}</span>
+                    </p>
+                  </div>
+                  <span
+                    :class="[
+                      'rounded-full px-2 py-1 text-xs flex-shrink-0',
+                      record.status === '已结束'
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-yellow-100 text-yellow-700',
+                    ]"
+                  >
+                    {{ record.status === '已结束' ? t('history.completed') : t('history.inProgress') }}
+                  </span>
+                </div>
+
+                <div class="flex items-center gap-2 flex-wrap">
+                  <button
+                    @click.stop="router.push(`/report/${record.id}`)"
+                    class="flex-1 min-h-[44px] rounded-lg bg-primary-50 px-3 py-2 text-sm font-medium text-primary-700 transition hover:bg-primary-100"
+                  >
+                    查看报告
+                  </button>
+                  <button
+                    @click.stop="router.push(`/interview/${record.id}/playback`)"
+                    class="min-h-[44px] rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-600 transition hover:bg-gray-50"
+                  >
+                    <svg viewBox="0 0 24 24" class="mr-1 inline h-4 w-4" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    回放
+                  </button>
+                  <span class="text-sm text-gray-500">{{ record.duration }} {{ t('history.minutes') }}</span>
+                  <button
+                    @click.stop="handleDelete(record.id)"
+                    :disabled="deleting"
+                    class="min-h-[44px] rounded-lg px-3 py-2 text-sm text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+                  >
+                    {{ t('common.delete') }}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

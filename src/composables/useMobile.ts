@@ -1,7 +1,9 @@
-import { detectHost } from '@/utils/bridge'
+import { detectHost, shareContent } from '@/utils/bridge'
 
 export function useMobile() {
   const host = detectHost()
+  const isCapacitor = host === 'capacitor'
+  const isMiniprogram = host === 'miniprogram'
 
   async function pickFile(): Promise<File | null> {
     return new Promise((resolve) => {
@@ -12,5 +14,9 @@ export function useMobile() {
     })
   }
 
-  return { pickFile, host }
+  async function share(opts: { title?: string; text?: string; url?: string }): Promise<void> {
+    await shareContent(opts)
+  }
+
+  return { pickFile, share, host, isCapacitor, isMiniprogram }
 }

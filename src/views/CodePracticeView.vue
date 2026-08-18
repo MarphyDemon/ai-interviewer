@@ -27,6 +27,7 @@ const position = ref('算法')
 
 // ---------- 编辑器 ----------
 const languages = ref<LanguageItem[]>([])
+const languagesLoading = ref(true)
 const currentLang = ref('python')
 const code = ref('')
 const editorMount = shallowRef<any>(null)
@@ -55,6 +56,8 @@ getLanguages().then((langs) => {
     currentLang.value = langs[0].id
     code.value = langs[0].template
   }
+}).finally(() => {
+  languagesLoading.value = false
 })
 
 // ---------- 方法 ----------
@@ -253,6 +256,7 @@ function onChatKeydown(e: KeyboardEvent) {
       </div>
       <div class="flex items-center gap-2">
         <select
+          v-if="!languagesLoading"
           v-model="currentLang"
           class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-primary-500 focus:outline-none"
         >
@@ -260,6 +264,10 @@ function onChatKeydown(e: KeyboardEvent) {
             {{ lang.label }}
           </option>
         </select>
+        <div v-else class="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm text-gray-400">
+          <span class="h-3 w-3 animate-spin rounded-full border-2 border-gray-200 border-t-gray-500"></span>
+          加载中...
+        </div>
         <button
           class="btn-ghost !px-4 !py-1.5 text-sm"
           :disabled="running || !code.trim()"

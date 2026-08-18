@@ -9,7 +9,12 @@ class User(SQLModel, table=True):
     anonymous_uuid: str = Field(unique=True, index=True)
     username: Optional[str] = Field(default=None, unique=True, index=True)
     password_hash: Optional[str] = None
-    preferred_avatar_id: Optional[int] = Field(default=None, foreign_key="avatar.id")
+    preferred_avatar_config_id: Optional[int] = Field(default=None, foreign_key="avatarproviderconfig.id")
+    role: str = "user"
+    preferred_position: str = ""
+    language: str = "zh"
+    theme: str = "light"
+    notification_settings: str = "{}"
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -129,6 +134,7 @@ class AvatarProviderConfig(SQLModel, table=True):
     app_id: str
     app_secret: str  # Fernet 加密存储
     gateway_server: str
+    avatar_image: str = ""  # 数字人形象图片 URL
     is_active: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -186,4 +192,90 @@ class Recording(SQLModel, table=True):
     file_size: int = 0
     duration_ms: int = 0
     mime_type: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class KnowledgeVersion(SQLModel, table=True):
+    """知识库文档版本（全量快照）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    doc_id: int = Field(foreign_key="knowledgedoc.id", index=True)
+    version_number: int = 1
+    content: str = ""
+    title: str = ""
+    position: str = ""
+    difficulty: str = ""
+    tags: str = "[]"
+    change_note: str = ""
+    created_by: Optional[int] = Field(default=None, foreign_key="user.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class KnowledgeEditLock(SQLModel, table=True):
+    """知识库独占编辑锁"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    doc_id: int = Field(foreign_key="knowledgedoc.id", unique=True, index=True)
+    user_id: int = Field(foreign_key="user.id")
+    locked_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: datetime
+
+
+class KnowledgeCollaborator(SQLModel, table=True):
+    """知识库协作者权限"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    doc_id: int = Field(foreign_key="knowledgedoc.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    permission: str = "read"  # read / edit / admin
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Notification(SQLModel, table=True):
+    """站内通知"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    type: str = "system"  # collaboration / review / system
+    title: str = ""
+    content: str = ""
+    is_read: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class InterviewTemplate(SQLModel, table=True):
+    """面试模板（P3）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    name: str
+    position: str = ""
+    difficulty: str = "中等"
+    duration: int = 30
+    style: str = "温和"
+    resume_id: Optional[int] = Field(default=None, foreign_key="resume.id")
+    jd_id: Optional[int] = Field(default=None, foreign_key="jobdescription.id")
+    avatar_config_id: Optional[int] = Field(default=None, foreign_key="avatarproviderconfig.id")
+    code_enabled: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class UserQuota(SQLModel, table=True):
+    """用户使用配额（P4）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", unique=True, index=True)
+    plan: str = "free"  # free / standard / enterprise
+    interview_limit: int = 10
+    interview_used: int = 0
+    knowledge_limit: int = 20
+    knowledge_used: int = 0
+    ai_calls_limit: int = 100
+    ai_calls_used: int = 0
+    expires_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class InviteCode(SQLModel, table=True):
+    """邀请码（P4）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    code: str = Field(unique=True, index=True)
+    owner_user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    reward_amount: int = 5
+    is_used: bool = False
+    used_by: Optional[int] = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)

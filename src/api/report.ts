@@ -6,8 +6,9 @@ export function getReport(interviewId: number): Promise<ReportData> {
 }
 
 export async function downloadReportPdf(interviewId: number): Promise<void> {
+  const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
   const response = await fetch(
-    `${import.meta.env.VITE_API_BASE_URL || '/api'}/report/${interviewId}/pdf`
+    `${baseURL}/report/${interviewId}/pdf`
   )
   if (!response.ok) throw new Error('PDF 导出失败')
   const blob = await response.blob()

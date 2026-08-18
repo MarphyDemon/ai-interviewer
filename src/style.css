@@ -34,34 +34,93 @@ body,
   }
 }
 
-/* 数字人全屏样式 */
-.avatar-stage:fullscreen {
-  width: 100vw;
-  height: 100vh;
-  border-radius: 0;
-  border: none;
-  background: #0f0a1f;
+/* 数字人舞台 9:16 竖版比例 */
+.avatar-stage {
+  aspect-ratio: 9 / 16;
+  max-height: 100%;
+  max-width: 100%;
+  height: 100%;
+  margin: 0 auto;
 }
-.avatar-stage:fullscreen #chat-avatar-container {
+
+.avatar-stage #chat-avatar-container {
   width: 100%;
   height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
 }
-.avatar-stage:-webkit-full-screen {
+
+.avatar-stage #chat-avatar-container canvas,
+.avatar-stage #chat-avatar-container video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* 数字人自定义全屏样式 */
+.avatar-stage.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   width: 100vw;
   height: 100vh;
+  aspect-ratio: auto;
+  max-height: none;
+  max-width: none;
+  margin: 0;
   border-radius: 0;
   border: none;
-  background: #0f0a1f;
+  background: linear-gradient(180deg, #f8fafc 0%, #e0e7ff 50%, #f8fafc 100%);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-.avatar-stage:-webkit-full-screen #chat-avatar-container {
+
+.avatar-stage.is-fullscreen #chat-avatar-container {
   width: 100%;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.avatar-stage.is-fullscreen #chat-avatar-container canvas,
+.avatar-stage.is-fullscreen #chat-avatar-container video {
+  object-position: bottom center;
+  pointer-events: none;
+}
+
+/* 全屏下控制区域样式优化 */
+.avatar-stage.is-fullscreen .fs-controls {
+  pointer-events: auto;
+}
+
+.avatar-stage.is-fullscreen .fs-controls.bottom-controls {
+  position: relative;
+  z-index: 100;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(226, 232, 240, 0.6);
+  padding: 16px 24px 32px;
+}
+
+.avatar-stage.is-fullscreen .fs-controls.exit-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 200;
 }
 
 /* Markdown 正文样式 */
 .markdown-body {
   line-height: 1.7;
   word-break: break-word;
+  overflow-wrap: break-word;
 }
 .markdown-body > *:first-child {
   margin-top: 0;
@@ -116,6 +175,8 @@ body,
   background: rgba(99, 102, 241, 0.08);
   padding: 0.15em 0.4em;
   border-radius: 4px;
+  word-break: break-all;
+  white-space: pre-wrap;
 }
 .markdown-body pre {
   margin: 0.6em 0;
@@ -123,6 +184,7 @@ body,
   background: #1e1b2e;
   border-radius: 8px;
   overflow-x: auto;
+  max-width: 100%;
 }
 .markdown-body pre code {
   background: transparent;
@@ -197,7 +259,7 @@ body,
     padding-top: env(safe-area-inset-top);
   }
   .safe-area-bottom {
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: calc(env(safe-area-inset-bottom) + 60px);
   }
 
   .interview-fullscreen {
@@ -210,15 +272,42 @@ body,
   }
 }
 
-/* Mobile safe area helper for Capacitor/notch devices */
-.safe-area-bottom {
-  padding-bottom: calc(env(safe-area-inset-bottom) + 56px);
+/* Miniprogram webview environment */
+.wx-env {
+  /* Disable hover effects for miniprogram touch */
+  .card,
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .container {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Ensure full-height layout in miniprogram */
+  #app {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  /* Improve scroll performance in webview */
+  .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+  }
 }
 
-/* Miniprogram webview environment */
-.wx-env .container {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+/* Capacitor native environment */
+.capacitor-env {
+  #app {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .safe-area-bottom {
+    padding-bottom: calc(env(safe-area-inset-bottom) + 56px);
+  }
 }
 
 /* Disable hover on touch devices */

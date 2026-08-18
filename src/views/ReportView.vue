@@ -150,18 +150,20 @@ function formatDate(iso: string | null): string {
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl px-4 py-10">
+  <div class="mx-auto max-w-3xl px-4 py-4 md:py-10 pb-24">
       <div v-if="loading" class="py-20 text-center text-gray-400">{{ t('common.loading') }}</div>
       <div v-else-if="errorMsg" class="py-20 text-center text-red-500">{{ errorMsg }}</div>
 
-      <div v-else-if="report" class="space-y-6">
+      <div v-else-if="report" class="space-y-4 md:space-y-6">
         <!-- 分享模式标识 -->
         <div v-if="shareMode" class="rounded-lg border border-primary-100 bg-primary-50/50 px-4 py-2 text-sm text-primary-700">
           🔗 您正在查看分享的面试报告
         </div>
 
         <div class="card">
-          <h1 class="mb-4 text-2xl font-bold text-gray-800">{{ t('report.title') }}</h1>
+          <div class="mb-4 md:mb-6 flex items-center justify-between">
+            <h1 class="text-xl md:text-2xl font-bold text-gray-800">{{ t('report.title') }}</h1>
+          </div>
           <div class="mb-6 flex items-center justify-around">
             <div class="text-center">
               <p class="text-sm text-gray-400">{{ t('report.totalScore') }}</p>
@@ -171,7 +173,7 @@ function formatDate(iso: string | null): string {
 
           <div class="mb-6">
             <h3 class="mb-3 font-semibold text-gray-700">{{ t('report.dimensions') }}</h3>
-            <div class="space-y-2">
+            <div class="space-y-3">
               <div v-for="dim in report.dimensionScores" :key="dim.label">
                 <div class="mb-1 flex justify-between text-sm">
                   <span class="text-gray-600">{{ dim.label }}</span>
@@ -179,7 +181,7 @@ function formatDate(iso: string | null): string {
                 </div>
                 <div class="h-2 rounded-full bg-gray-200">
                   <div
-                    class="h-2 rounded-full bg-primary-500"
+                    class="h-2 rounded-full bg-primary-500 transition-all"
                     :style="{ width: dim.score + '%' }"
                   ></div>
                 </div>
@@ -245,7 +247,7 @@ function formatDate(iso: string | null): string {
         </div>
 
         <div class="card">
-          <h2 class="mb-4 text-xl font-semibold text-gray-800">{{ t('report.perQuestion') }}</h2>
+          <h2 class="mb-4 text-lg md:text-xl font-semibold text-gray-800">{{ t('report.perQuestion') }}</h2>
           <div class="space-y-4">
             <div
               v-for="(review, idx) in report.perQuestionReviews"
@@ -272,24 +274,24 @@ function formatDate(iso: string | null): string {
               </span>
             </div>
 
-            <div v-if="shareStatus?.token && !shareStatus.expired" class="space-y-2">
-              <div class="flex items-center gap-2">
+            <div v-if="shareStatus?.token && !shareStatus.expired" class="space-y-3">
+              <div class="flex flex-col md:flex-row gap-2">
                 <input
                   :value="shareUrl"
                   readonly
-                  class="flex-1 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600"
+                  class="flex-1 rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-600 min-h-[44px]"
                   @click="($event.target as HTMLInputElement).select()"
                 />
                 <button
                   @click="copyShareUrl"
-                  class="rounded-lg bg-primary-50 px-3 py-2 text-sm font-medium text-primary-700 transition hover:bg-primary-100"
+                  class="rounded-lg bg-primary-50 px-4 py-2 text-sm font-medium text-primary-700 min-h-[44px] transition hover:bg-primary-100"
                 >
                   {{ copied ? '✓ 已复制' : '复制' }}
                 </button>
                 <button
                   @click="revokeShare"
                   :disabled="shareLoading"
-                  class="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+                  class="rounded-lg bg-red-50 px-4 py-2 text-sm font-medium text-red-600 min-h-[44px] transition hover:bg-red-100 disabled:opacity-50"
                 >
                   吊销
                 </button>
@@ -302,7 +304,7 @@ function formatDate(iso: string | null): string {
               <button
                 @click="generateShare"
                 :disabled="shareLoading"
-                class="btn-primary !py-2"
+                class="btn-primary w-full min-h-[44px]"
               >
                 {{ shareLoading ? '生成中...' : '重新生成分享链接' }}
               </button>
@@ -312,23 +314,23 @@ function formatDate(iso: string | null): string {
               v-else
               @click="generateShare"
               :disabled="shareLoading"
-              class="btn-primary !py-2"
+              class="btn-primary w-full min-h-[44px]"
             >
               {{ shareLoading ? '生成中...' : '生成分享链接' }}
             </button>
           </div>
 
-          <div class="flex gap-4">
+          <div class="flex flex-col md:flex-row gap-3">
             <button
               @click="exportPDF"
               :disabled="exporting"
-              class="btn-primary !py-2"
+              class="btn-primary w-full md:w-auto min-h-[44px]"
             >
               {{ exporting ? t('common.loading') : t('report.exportPdf') }}
             </button>
             <button
               @click="router.push('/history')"
-              class="btn-ghost !py-2"
+              class="btn-ghost w-full md:w-auto min-h-[44px]"
             >
               {{ t('report.viewHistory') }}
             </button>
