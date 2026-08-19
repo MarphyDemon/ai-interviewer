@@ -151,50 +151,81 @@ async def generate_stream(
     conversation_id: int,
     user_message: str,
 ) -> AsyncGenerator[str, None]:
-    """流式生成：RAG 检索 → 调用 LLM → 输出标准 SSE chunk。"""
-    # 1. 持久化用户消息
+    """流式生成：RAG 检索 → 调用 LLM → 输出标准 OpenAI SSE chunk。
+
+    使用独立 session 操作数据库，避免依赖注入的 session 在异步流期间被关闭。
+    """
+    from server.database import engine
+    import uuid
+    from datetime import datetime as dt
+
+    # 持久化用户消息
     session.add(
         ChatMessage(conversation_id=conversation_id, role="user", content=user_message)
     )
-
     conv = session.get(ChatConversation, conversation_id)
     if conv and (not conv.title or conv.title == "新对话"):
         conv.title = user_message[:20] + ("…" if len(user_message) > 20 else "")
+    session.commit()
 
-    # 2. RAG 检索
+    # RAG 检索
     knowledge = await _retrieve_knowledge(user_message)
-
-    # 3. 构建消息列表
     messages = _build_messages(session, conversation_id, user_message, knowledge)
 
-    # 4. 调用 LLM
     cfg = get_active_llm_config(session)
-    from openai import AsyncOpenAI
-
     client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+
     full_response = ""
-    stream = await client.chat.completions.create(
-        model=cfg.model, messages=messages, stream=True
-    )
+    chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
+    created_ts = int(dt.utcnow().timestamp())
 
     try:
-        async for chunk in stream:
+        async for chunk in client.chat.completions.create(
+            model=cfg.model, messages=messages, stream=True
+        ):
             delta = chunk.choices[0].delta.content or ""
             if delta:
                 full_response += delta
-                yield delta
-    finally:
-        if full_response:
-            session.add(
-                ChatMessage(
-                    conversation_id=conversation_id,
-                    role="assistant",
-                    content=full_response,
+                sse_chunk = json.dumps(
+                    {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": cfg.model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": delta},
+                                "finish_reason": None,
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
                 )
-            )
-            if conv:
-                conv.updated_at = datetime.utcnow()
-            session.commit()
+                yield f"data: {sse_chunk}\n\n"
+    except Exception as e:
+        print(f"[Avatar Brain] Stream error: {e}")
+    finally:
+        # 发送 [DONE] 确保 SDK 正常关闭流
+        yield "data: [DONE]\n\n"
+
+        # 持久化 assistant 回复
+        if full_response:
+            try:
+                with Session(engine) as db:
+                    db.add(
+                        ChatMessage(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content=full_response,
+                        )
+                    )
+                    conv_ref = db.get(ChatConversation, conversation_id)
+                    if conv_ref:
+                        conv_ref.updated_at = dt.utcnow()
+                    db.commit()
+            except Exception as e:
+                print(f"[Avatar Brain] Failed to save assistant message: {e}")
 
 
 async def generate_non_stream(
