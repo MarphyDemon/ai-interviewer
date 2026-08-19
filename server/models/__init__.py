@@ -279,3 +279,13 @@ class InviteCode(SQLModel, table=True):
     is_used: bool = False
     used_by: Optional[int] = Field(default=None, foreign_key="user.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class AvatarSessionToken(SQLModel, table=True):
+    """数字人 SDK 会话 Token：长时效（24h），用作 brain_config.api_key 代理 RAG+LLM 请求。"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    token: str = Field(unique=True, index=True)
+    conversation_id: int = Field(foreign_key="chatconversation.id")
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -6,6 +6,8 @@ import { WebSpeechTtsProvider } from '@/providers/webSpeechTtsProvider'
 import { WebSpeechAsrProvider } from '@/providers/webSpeechAsrProvider'
 import { detectHost } from '@/utils/bridge'
 import { useDevice } from '@/composables/useDevice'
+import { getBrainConfig } from '@/api/avatar'
+import type { BrainConfig } from '@/types'
 
 const avatarProvider = ref<AvatarProvider | null>(null)
 const isDigital = ref(false)
@@ -40,8 +42,14 @@ export function useAvatar() {
 
     if (webglOk && (isMobile.value || webCodecsOk)) {
       try {
+        let brainConfig: BrainConfig | undefined
+        try {
+          brainConfig = await getBrainConfig()
+        } catch {
+          console.warn('[Avatar] Failed to fetch brain-config, SDK will use default behavior')
+        }
         const provider = new DigitalAvatarProvider()
-        await provider.init(containerId)
+        await provider.init(containerId, brainConfig)
         avatarProvider.value = provider
         isDigital.value = true
         return provider

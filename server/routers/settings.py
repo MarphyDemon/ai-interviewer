@@ -1,7 +1,7 @@
 import json
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlmodel import Session
+from sqlmodel import Session, select
 from server.database import get_session
 from server.models import User, UserQuota, Notification
 from server.services.auth_service import get_current_user
@@ -43,7 +43,7 @@ async def get_personal_settings(
             "knowledgeUsed": quota.knowledge_used if quota else 0,
             "aiCallsLimit": quota.ai_calls_limit if quota else 100,
             "aiCallsUsed": quota.ai_calls_used if quota else 0,
-        } if quota or True else None,
+        } if quota else None,
     }
 
 

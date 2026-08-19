@@ -1,8 +1,12 @@
 import client from './client'
-import type { AvatarConfig } from '@/types'
+import type { AvatarConfig, BrainConfig } from '@/types'
 
 export function getAvatarConfig(): Promise<AvatarConfig> {
   return client.get('/avatar/config')
+}
+
+export function getBrainConfig(): Promise<BrainConfig> {
+  return client.get('/avatar/brain-config')
 }
 
 export interface HomepageAvatarItem {

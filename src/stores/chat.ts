@@ -27,18 +27,26 @@ export const useChatStore = defineStore('chat', () => {
     selectLoading.value = true
     currentId.value = id
     try {
-      currentMessages.value = await chatApi.getMessages(id)
+      // 正在流式接收时不覆盖消息列表，避免丢失本地已添加的消息
+      if (!streaming.value) {
+        currentMessages.value = await chatApi.getMessages(id)
+      }
     } finally {
       selectLoading.value = false
     }
   }
 
-  async function newConversation(): Promise<number> {
+  async function newConversation(options?: { skipLoadMessages?: boolean }): Promise<number> {
     newConversationLoading.value = true
     try {
       const conv = await chatApi.createConversation()
       conversations.value.unshift(conv)
-      await selectConversation(conv.id)
+      currentId.value = conv.id
+      // 如果需要跳过加载消息（例如在 sendMessage 中创建新会话时）
+      // 因为后续会立即添加消息，不需要从服务器加载空列表
+      if (!options?.skipLoadMessages) {
+        await selectConversation(conv.id)
+      }
       return conv.id
     } finally {
       newConversationLoading.value = false
@@ -67,7 +75,8 @@ export const useChatStore = defineStore('chat', () => {
 
   async function sendMessage(message: string, onDelta?: (delta: string) => void) {
     if (!currentId.value) {
-      await newConversation()
+      // 创建新会话时跳过加载消息，避免覆盖后续本地添加的消息
+      await newConversation({ skipLoadMessages: true })
     }
     const convId = currentId.value!
 

@@ -16,7 +16,7 @@ export class LottieAvatarProvider implements AvatarProvider {
     this.asrProvider = asrProvider
   }
 
-  async init(containerId: string): Promise<void> {
+  async init(containerId: string, _brainConfig?: import('@/types').BrainConfig): Promise<void> {
     this.container = document.getElementById(containerId)
     if (!this.container) {
       throw new Error(`Container #${containerId} not found`)
@@ -103,6 +103,11 @@ export class LottieAvatarProvider implements AvatarProvider {
         avatarEl.classList.remove('speaking')
       }
     }
+  }
+
+  /** Lottie 走 DOM 自适应，无需额外适配 */
+  resize(): void {
+    // no-op：浏览器 DOM 尺寸变化自动生效
   }
 
   async destroy(): Promise<void> {

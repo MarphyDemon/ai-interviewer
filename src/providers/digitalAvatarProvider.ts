@@ -1,6 +1,6 @@
 import XingyunAvatarAgent from '@xmov/avatar/agent'
 import type { AvatarProvider } from './avatarProvider'
-import type { ASRResult } from '@/types'
+import type { ASRResult, BrainConfig } from '@/types'
 import { getAvatarConfig } from '@/api/avatar'
 import type { AvatarConfig } from '@/types'
 
@@ -10,17 +10,20 @@ export class DigitalAvatarProvider implements AvatarProvider {
   private agent: XingyunAvatarAgent | null = null
   private ready = false
   private asrCallback: ASRCallback | null = null
+  private subtitleCallback: ((text: string | null, on: boolean) => void) | null = null
   private config: AvatarConfig | null = null
+  private brainConfig: BrainConfig | null = null
 
-  async init(containerId: string): Promise<void> {
+  async init(containerId: string, brainConfig?: BrainConfig): Promise<void> {
     this.config = await getAvatarConfig()
+    this.brainConfig = brainConfig ?? null
 
     const container = document.getElementById(containerId)
     if (!container) {
       throw new Error(`Container #${containerId} not found`)
     }
 
-    this.agent = new XingyunAvatarAgent({
+    const agentOptions: Record<string, unknown> = {
       containerId,
       container,
       appId: this.config.appId,
@@ -35,6 +38,14 @@ export class DigitalAvatarProvider implements AvatarProvider {
         },
         "vad_merge_mode": true,
         "volume_and_repetition_text_detection": true
+      },
+      "proxyWidget": {
+        subtitle_on: (data: any) => {
+          this.subtitleCallback?.(data?.text ?? null, true)
+        },
+        subtitle_off: (_data: any) => {
+          this.subtitleCallback?.(null, false)
+        },
       },
       "asr_config": {
         "provider": "doubao",
@@ -56,12 +67,6 @@ export class DigitalAvatarProvider implements AvatarProvider {
           "force_to_speech_time": 1000
         }
       },
-      "brain_config": {
-        "provider": "doubao",
-        "model": "ep-20260326184144-bln7r",
-        "api_key": "669350ba-bc3b-4802-b252-f6213b9433bc",
-        "base_url": "https://ark.cn-beijing.volces.com/api/v3"
-      },
       config: {
         init_events: [
           {
@@ -77,7 +82,7 @@ export class DigitalAvatarProvider implements AvatarProvider {
       },
       appSecret: this.config.appSecret,
       gatewayServer: this.config.gatewayServer,
-      onMessage: (error) => {
+      onMessage: (error: any) => {
         console.error(
           '[Avatar] SDK message:',
           error.error_name || error.code,
@@ -85,25 +90,38 @@ export class DigitalAvatarProvider implements AvatarProvider {
         )
       },
       agentCallbacks: {
-        onASRResult: (result) => {
+        onASRResult: (result: any) => {
+          console.log(result)
           if (this.asrCallback) {
             this.asrCallback({ text: result.text, isFinal: result.isFinal })
           }
         },
-        onAgentStateChange: (state) => {
+        onAgentStateChange: (state: string) => {
           console.debug('[Avatar] agent state:', state)
         },
-        onSpeakStateChange: (event) => {
+        onSpeakStateChange: (event: any) => {
           console.debug('[Avatar] speak state:', event.state)
         },
-        onConversationChange: (event) => {
+        onConversationChange: (event: any) => {
           console.debug('[Avatar] conversation:', event.state)
         },
-        onError: (error) => {
+        onError: (error: any) => {
           console.error('[Avatar] error:', error.code, error.message)
         },
       },
-    })
+    }
+
+    if (this.brainConfig) {
+      agentOptions['brain_config'] = {
+        provider: this.brainConfig.provider,
+        model: this.brainConfig.model,
+        api_key: this.brainConfig.api_key,
+        base_url: this.brainConfig.base_url,
+        ...(this.brainConfig.extra_body ? { extra_body: this.brainConfig.extra_body } : {}),
+      }
+    }
+
+    this.agent = new XingyunAvatarAgent(agentOptions as any)
 
     await this.agent.init({
       onDownloadProgress: (progress) => {
@@ -147,6 +165,18 @@ export class DigitalAvatarProvider implements AvatarProvider {
     this.speakStreamStarted = false
   }
 
+  /** 停止流式播报：发送空的 is_end 帧关闭当前播报流 */
+  stopSpeakStream(): void {
+    if (!this.agent) return
+    try {
+      ; (this.agent as any).sendControl({
+        type: 'speak',
+        message: { text: '', is_start: false, is_end: true },
+      })
+    } catch { /* ignore */ }
+    this.speakStreamStarted = false
+  }
+
   async startASR(onResult: ASRCallback): Promise<void> {
     if (!this.agent) throw new Error('Avatar not initialized')
     this.asrCallback = onResult
@@ -167,6 +197,33 @@ export class DigitalAvatarProvider implements AvatarProvider {
 
   idle(): void {
     if (this.agent) this.agent.idle()
+  }
+
+  /** 容器尺寸/位置变化时通知 SDK 重新适配画布，避免销毁重建 */
+  resize(): void {
+    if (!this.agent) return
+    try {
+      // SDK 可能暴露 resize 或 updateCanvas 方法，优先调用
+      const agent = this.agent as unknown as {
+        resize?: () => void
+        updateCanvas?: () => void
+        onResize?: () => void
+      }
+      if (typeof agent.resize === 'function') {
+        agent.resize()
+      } else if (typeof agent.updateCanvas === 'function') {
+        agent.updateCanvas()
+      } else if (typeof agent.onResize === 'function') {
+        agent.onResize()
+      }
+    } catch (e) {
+      console.debug('[Avatar] resize skipped:', e)
+    }
+  }
+
+  /** 注册字幕显示回调，用于 SDK 代理 subtitle_on / subtitle_off 事件 */
+  setOnSubtitle(callback: (text: string | null, on: boolean) => void): void {
+    this.subtitleCallback = callback
   }
 
   async destroy(): Promise<void> {

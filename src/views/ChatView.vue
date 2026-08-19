@@ -32,17 +32,34 @@ const streamAborted = ref(false)
 const avatarStageEl = ref<HTMLElement | null>(null)
 const isFullscreen = ref(false)
 const fullscreenPartialText = ref('')
+const sdkSubtitleText = ref('')
+const sdkSubtitleVisible = ref(false)
+
+// 持续对话状态 (Plan C)
+const fullscreenListening = ref(false)
+const pendingFullscreenMessage = ref<string | null>(null)
+let fullscreenASRRunning = false
+let fullscreenStartPromise: Promise<void> | null = null
+let fullscreenStopRequested = false
+let isRestartingFromSend = false
+
+// ASR 文字自动消失计时器
+let asrAutoClearTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleAsrAutoClear(delay = 4000) {
+  if (asrAutoClearTimer) clearTimeout(asrAutoClearTimer)
+  asrAutoClearTimer = setTimeout(() => {
+    fullscreenPartialText.value = ''
+    asrAutoClearTimer = null
+  }, delay)
+}
+function cancelAsrAutoClear() {
+  if (asrAutoClearTimer) {
+    clearTimeout(asrAutoClearTimer)
+    asrAutoClearTimer = null
+  }
+}
 
 const hasConversation = computed(() => store.currentId !== null)
-
-/** 最新一条 assistant 消息内容（全屏字幕用） */
-const latestAssistantText = computed(() => {
-  const msgs = store.currentMessages
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === 'assistant') return msgs[i].content
-  }
-  return ''
-})
 
 function handleFullscreenKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape' && isFullscreen.value) {
@@ -58,6 +75,13 @@ onMounted(async () => {
 onUnmounted(() => {
   stopSpeaking()
   stopListening()
+  fullscreenASRRunning = false
+  fullscreenStartPromise = null
+  fullscreenStopRequested = false
+  isRestartingFromSend = false
+  fullscreenListening.value = false
+  pendingFullscreenMessage.value = null
+  disconnectAvatarResize()
   destroyAvatar()
   window.removeEventListener('keydown', handleFullscreenKeydown)
 })
@@ -68,22 +92,49 @@ watch(
   () => scrollToBottom(),
 )
 
-// 窗口尺寸变化时，重新初始化数字人 SDK（容器位置变了）
-watch(isNarrow, async () => {
-  if (!showAvatar.value) return
-  avatarLoading.value = true
-  avatarFailed.value = false
-  try {
-    await destroyAvatar()
-    await nextTick()
-    await initAvatar('chat-avatar-container')
-  } catch (e) {
-    console.warn('[Chat Avatar] re-init failed:', e)
-    avatarFailed.value = true
-  } finally {
-    avatarLoading.value = false
+// 全屏状态变化时滚动到底部，确保退出全屏后消息可见
+watch(isFullscreen, (fullscreen) => {
+  if (!fullscreen) {
+    nextTick(() => scrollToBottom())
   }
 })
+
+// 全屏自动打断：当流式生成被打断后，自动发送暂存的消息 或 重启 ASR
+watch(() => store.streaming, async (streaming) => {
+  if (streaming) return
+  if (!isFullscreen.value) return
+
+  if (pendingFullscreenMessage.value) {
+    // 始终优先处理暂存的打断消息（即使在 send 流程中被再次打断）
+    const msg = pendingFullscreenMessage.value
+    pendingFullscreenMessage.value = null
+    await sendFullscreenMessage(msg)
+  } else if (!isRestartingFromSend) {
+    // 正常停止/异常中断后，重启 ASR（排除 send 流程自身触发的 streaming 变化）
+    startFullscreenASR()
+  }
+})
+
+// 窗口尺寸变化时无需重新初始化，容器始终存在于 DOM 中
+// 使用 ResizeObserver 监听容器尺寸/位置变化，通知底层 SDK 重新适配画布
+let resizeObserver: ResizeObserver | null = null
+
+async function observeAvatarResize() {
+  await nextTick()
+  const stage = avatarStageEl.value
+  if (!stage) return
+  resizeObserver?.disconnect()
+  resizeObserver = new ResizeObserver(() => {
+    const provider = getProvider()
+    if (provider?.resize) provider.resize()
+  })
+  resizeObserver.observe(stage)
+}
+
+function disconnectAvatarResize() {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+}
 
 async function scrollToBottom() {
   await nextTick()
@@ -139,14 +190,16 @@ async function handleSend() {
   const msg = input.value.trim()
   if (!msg || store.streaming) return
   input.value = ''
+  if (isFullscreen.value) {
+    await sendFullscreenMessage(msg)
+    return
+  }
   streamAborted.value = false
-  // 开始新回答前打断上一轮播报，并开启新的流式播报会话
   if (autoSpeak.value) {
     stopSpeaking()
     getProvider()?.startSpeakStream?.()
   }
   await store.sendMessage(msg, (delta) => feedSpeak(delta))
-  // 用户主动打断则不再发送结束帧（避免 interrupt 后又触发一次 speak）
   if (autoSpeak.value && !streamAborted.value) endSpeak()
   streamAborted.value = false
   scrollToBottom()
@@ -157,14 +210,15 @@ function handleStop() {
   streamAborted.value = true
   speakBuffer.value = ''
   store.stopGeneration()
-  if (autoSpeak.value) stopSpeaking()
+  stopSpeaking()
 }
 
+/** 切换数字人显示/隐藏 */
 async function toggleAvatar() {
   if (showAvatar.value) {
-    // 关闭：清理
     stopSpeaking()
     stopListening()
+    disconnectAvatarResize()
     await destroyAvatar()
     showAvatar.value = false
     avatarFailed.value = false
@@ -176,6 +230,18 @@ async function toggleAvatar() {
   await nextTick()
   try {
     await initAvatar('chat-avatar-container')
+    observeAvatarResize()
+    const provider = getProvider()
+    if (provider?.setOnSubtitle) {
+      provider.setOnSubtitle((text, on) => {
+        if (on && text) {
+          sdkSubtitleText.value = text
+          sdkSubtitleVisible.value = true
+        } else {
+          sdkSubtitleVisible.value = false
+        }
+      })
+    }
   } catch (e) {
     console.warn('[Chat Avatar] init failed:', e)
     avatarFailed.value = true
@@ -196,10 +262,13 @@ function speakText(text: string) {
 function stopSpeaking() {
   const provider = getProvider()
   if (!provider) return
+  provider.stopSpeakStream?.()
   provider.interrupt?.()
+  speakBuffer.value = ''
   speaking.value = false
 }
 
+/** 窄屏/侧栏模式下的手动麦克风 (push-to-talk) */
 function toggleMic() {
   if (listening.value) {
     stopListening()
@@ -224,57 +293,135 @@ function stopListening() {
   listening.value = false
 }
 
-/** 进入数字人全屏（自定义浮层，非浏览器 Fullscreen API） */
-function enterFullscreen() {
-  isFullscreen.value = true
-  stopListening()
-  fullscreenPartialText.value = ''
-}
-
-/** 退出数字人全屏 */
-function exitFullscreen() {
-  isFullscreen.value = false
-  stopListening()
-  fullscreenPartialText.value = ''
-}
-
-/** 全屏下的麦克风：ASR final 后自动发送 */
-function toggleFullscreenMic() {
-  if (listening.value) {
-    stopListening()
-    fullscreenPartialText.value = ''
+/** 启动全屏持续 ASR 监听 (Plan C) - 带竞态保护 */
+async function startFullscreenASR() {
+  if (fullscreenASRRunning) return
+  if (fullscreenStartPromise) {
+    // 已有 start 进行中，等它完成
+    await fullscreenStartPromise
     return
   }
   const provider = getProvider()
   if (!provider || !provider.isReady()) return
-  listening.value = true
-  fullscreenPartialText.value = ''
-  provider.startASR((result) => {
-    if (result.isFinal && result.text) {
-      const msg = result.text.trim()
-      if (msg && !store.streaming) {
-        fullscreenPartialText.value = ''
-        listening.value = false
-        sendFullscreenMessage(msg)
+
+  fullscreenStartPromise = (async () => {
+    try {
+      fullscreenStopRequested = false
+      await provider.startASR((result) => {
+        if (fullscreenStopRequested) return
+        if (result.isFinal && result.text) {
+          const msg = result.text.trim()
+          fullscreenPartialText.value = msg
+          if (!msg) return
+          if (store.streaming) {
+            // 自动打断 (Plan A)
+            pendingFullscreenMessage.value = msg
+            streamAborted.value = true
+            speakBuffer.value = ''
+            store.stopGeneration()
+            stopSpeaking()
+            // 打断后临时停 ASR，等待重启
+            const p = getProvider()
+            p?.stopASR?.()
+            fullscreenASRRunning = false
+            fullscreenListening.value = false
+            listening.value = false
+          } else {
+            sendFullscreenMessage(msg)
+          }
+        } else {
+          fullscreenPartialText.value = result.text
+          scheduleAsrAutoClear()
+        }
+      })
+      if (!fullscreenStopRequested) {
+        fullscreenASRRunning = true
+        fullscreenListening.value = true
+        listening.value = true
       }
-    } else {
-      fullscreenPartialText.value = result.text
+    } catch {
+      fullscreenASRRunning = false
+      fullscreenListening.value = false
+      listening.value = false
+    } finally {
+      fullscreenStartPromise = null
     }
-  }).catch(() => {
-    listening.value = false
-  })
+  })()
+  await fullscreenStartPromise
 }
 
-/** 全屏下直接发送消息（不经 input 中转） */
+/** 停止全屏持续 ASR 监听 - 带竞态保护 */
+async function stopFullscreenASR() {
+  fullscreenStopRequested = true
+  if (fullscreenStartPromise) {
+    await fullscreenStartPromise
+    fullscreenStartPromise = null
+  }
+  if (fullscreenASRRunning) {
+    const provider = getProvider()
+    await provider?.stopASR?.()
+    fullscreenASRRunning = false
+  }
+  fullscreenListening.value = false
+  listening.value = false
+}
+
+/** 切换全屏 ASR 监听状态 - Plan C 下 mic 按钮为静音开关 */
+function toggleFullscreenListening() {
+  if (fullscreenASRRunning || fullscreenStartPromise) {
+    stopFullscreenASR()
+  } else {
+    startFullscreenASR()
+  }
+}
+
+/** 进入数字人全屏 - 数字人展示，ASR 等待用户点击麦克风启动 */
+function enterFullscreen() {
+  isFullscreen.value = true
+  fullscreenPartialText.value = ''
+  cancelAsrAutoClear()
+}
+
+/** 退出数字人全屏 */
+async function exitFullscreen() {
+  isFullscreen.value = false
+  cancelAsrAutoClear()
+  pendingFullscreenMessage.value = null
+  await stopFullscreenASR()
+  if (store.streaming) {
+    streamAborted.value = true
+    store.stopGeneration()
+    stopSpeaking()
+  }
+  fullscreenPartialText.value = ''
+  nextTick(() => scrollToBottom())
+}
+
+/** 全屏/窄屏 下直接发送消息 */
 async function sendFullscreenMessage(msg: string) {
   streamAborted.value = false
+  // 发送前停止 ASR，避免回声（带竞态保护）
+  if (fullscreenASRRunning || fullscreenStartPromise) {
+    await stopFullscreenASR()
+  }
   if (autoSpeak.value) {
     stopSpeaking()
     getProvider()?.startSpeakStream?.()
   }
-  await store.sendMessage(msg, (delta) => feedSpeak(delta))
-  if (autoSpeak.value && !streamAborted.value) endSpeak()
+  // 标记正在从发送流程中重启，避免 watcher 重复触发
+  isRestartingFromSend = true
+  try {
+    await store.sendMessage(msg, (delta) => feedSpeak(delta))
+    if (autoSpeak.value && !streamAborted.value) endSpeak()
+  } finally {
+    isRestartingFromSend = false
+  }
   streamAborted.value = false
+  scrollToBottom()
+  // 回复完成后自动重启 ASR 持续监听
+  if (isFullscreen.value) {
+    startFullscreenASR()
+  }
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -309,7 +456,7 @@ async function handleDelete(id: number) {
 
 <template>
   <div
-    class="flex"
+    class="relative flex"
     :class="[
       isMobile ? 'h-[calc(100vh-60px)]' : 'h-[calc(100vh-4rem)]',
       { 'overflow-hidden': !isFullscreen, 'overflow-visible': isFullscreen },
@@ -325,7 +472,6 @@ async function handleDelete(id: number) {
         </button>
       </div>
       <div class="flex-1 overflow-y-auto px-2 pb-3">
-        <!-- 加载中骨架屏 -->
         <div v-if="store.conversationsLoading" class="space-y-2 px-1 py-4">
           <div v-for="i in 5" :key="i" class="h-8 animate-pulse rounded-lg bg-gray-100"></div>
         </div>
@@ -352,9 +498,7 @@ async function handleDelete(id: number) {
               />
             </span>
             <span v-else class="flex-1 truncate">{{ conv.title }}</span>
-            <!-- 切换会话加载指示 -->
             <span v-if="store.selectLoading && store.currentId === conv.id" class="h-3 w-3 animate-spin rounded-full border-2 border-primary-200 border-t-primary-600"></span>
-            <!-- 删除加载指示 -->
             <span v-else-if="store.removeLoading === conv.id" class="h-3 w-3 animate-spin rounded-full border-2 border-red-200 border-t-red-500"></span>
             <span v-else-if="editingId !== conv.id" class="hidden shrink-0 gap-1 group-hover:flex">
               <button @click.stop="startRename(conv.id, conv.title)" class="text-gray-400 hover:text-primary-600" :title="t('chat.rename')">
@@ -399,7 +543,6 @@ async function handleDelete(id: number) {
           </button>
         </div>
 
-        <!-- 加载消息中 -->
         <div v-else-if="store.selectLoading" class="mx-auto max-w-3xl space-y-4 py-8">
           <div v-for="i in 3" :key="i" :class="['flex', i % 2 === 0 ? 'justify-start' : 'justify-end']">
             <div class="h-10 w-3/4 animate-pulse rounded-2xl bg-gray-100"></div>
@@ -509,212 +652,212 @@ async function handleDelete(id: number) {
       </div>
     </main>
 
-    <!-- 右：数字人侧栏（TTS 播报 / ASR 输入）—— 仅宽屏显示 -->
-    <aside
-      v-if="showAvatar && !isNarrow"
-      :class="{ 'backdrop-blur': !isFullscreen, 'bg-white/60': !isFullscreen }"
-      class="flex w-80 shrink-0 flex-col items-center border-l border-primary-100/60 p-4"
+    <!-- 浮动数字人容器：单一 DOM，通过 CSS 切换位置/大小 -->
+    <div
+      v-if="showAvatar"
+      :class="[
+        'avatar-float',
+        isNarrow || isFullscreen ? 'avatar-float--full' : 'avatar-float--side',
+      ]"
     >
-      <div class="mb-3 flex items-center justify-between">
-        <p class="text-sm font-semibold text-gray-700">{{ t('chat.avatarPanel') }}</p>
-        <div class="flex items-center gap-3">
-          <label class="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500">
-            <input type="checkbox" v-model="autoSpeak" class="h-3.5 w-3.5 rounded border-primary-300 text-primary-600 focus:ring-primary-400" />
-            {{ t('chat.autoSpeak') }}
-          </label>
-          <button
-            v-if="autoSpeak && store.streaming"
-            type="button"
-            class="rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-600 transition hover:bg-red-100"
-            @click="stopSpeaking()"
-          >
-            ⏹ 打断播报
-          </button>
-          <!-- 全屏按钮 -->
-          <button
-            v-if="!isFullscreen"
-            type="button"
-            class="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-600 transition hover:bg-primary-100"
-            title="全屏数字人"
-            @click="enterFullscreen"
-          >
-            ⤢ 全屏
-          </button>
+      <!-- 数字人舞台：侧栏模式自适应，全屏模式使用 flex: 1 -->
+      <div
+        ref="avatarStageEl"
+        class="avatar-stage relative overflow-hidden"
+        :class="{ 'flex-1 min-h-0': isNarrow || isFullscreen }"
+      >
+        <div id="chat-avatar-container" class="h-full w-full"></div>
+
+        <!-- 加载中遮罩 -->
+        <div v-if="avatarLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/60 backdrop-blur">
+          <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-200 border-t-primary-600"></div>
+          <p class="mt-3 text-xs text-gray-500">{{ t('chat.avatarLoading') }}</p>
+        </div>
+
+        <!-- 失败遮罩 -->
+        <div v-else-if="avatarFailed" class="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
+          <p class="text-xs text-gray-400">{{ t('chat.avatarFailed') }}</p>
         </div>
       </div>
 
-      <!-- 数字人舞台（9:16 竖版比例） -->
-      <div class="flex w-full flex-1 items-center justify-center">
+      <!-- SDK 字幕代理渲染：移至 avatar-float 层级，避免被数字人 canvas 遮挡 -->
+      <transition name="fade-up">
         <div
-          ref="avatarStageEl"
-          :class="[
-            'avatar-stage relative w-full max-h-full overflow-hidden rounded-2xl border border-primary-100/60 bg-gradient-brand-soft',
-            { 'is-fullscreen': isFullscreen },
-          ]"
+          v-if="sdkSubtitleVisible && sdkSubtitleText && (isNarrow || isFullscreen)"
+          class="sdk-subtitle pointer-events-none absolute left-1/2 z-[100] max-w-[80%] -translate-x-1/2 rounded-2xl bg-white/90 px-4 py-2 text-center text-sm text-gray-800 shadow"
+          :class="isFullscreen ? 'bottom-40' : 'bottom-32'"
         >
-          <div id="chat-avatar-container" class="h-full w-full"></div>
-          <div v-if="avatarLoading && !isFullscreen" class="absolute inset-0 flex flex-col items-center justify-center bg-white/60 backdrop-blur">
-            <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary-200 border-t-primary-600"></div>
-            <p class="mt-3 text-xs text-gray-500">{{ t('chat.avatarLoading') }}</p>
-          </div>
-          <div v-else-if="avatarFailed && !isFullscreen" class="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
-            <span class="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-primary-100 text-primary-500">
-              <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-            </span>
-            <p class="text-xs text-gray-400">{{ t('chat.avatarFailed') }}</p>
-          </div>
+          {{ sdkSubtitleText }}
+        </div>
+      </transition>
 
-          <!-- 全屏模式浮层 -->
-          <template v-if="isFullscreen">
-            <!-- 退出按钮 -->
+      <!-- 控制栏：宽屏侧栏模式 -->
+      <template v-if="!isNarrow && !isFullscreen">
+        <div class="avatar-controls mt-2 flex items-center justify-between">
+          <p class="text-sm font-semibold text-gray-700">{{ t('chat.avatarPanel') }}</p>
+          <div class="flex items-center gap-2">
+            <label class="flex cursor-pointer items-center gap-1.5 text-xs text-gray-500">
+              <input type="checkbox" v-model="autoSpeak" class="h-3.5 w-3.5 rounded border-primary-300 text-primary-600 focus:ring-primary-400" />
+              {{ t('chat.autoSpeak') }}
+            </label>
+            <button
+              v-if="autoSpeak && store.streaming"
+              type="button"
+              class="rounded-full bg-red-50 px-2 py-1 text-xs font-medium text-red-600 transition hover:bg-red-100"
+              @click="stopSpeaking()"
+            >
+              ⏹ 打断
+            </button>
             <button
               type="button"
-              class="fs-controls exit-btn flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-gray-600 shadow-lg transition hover:bg-white"
-              title="退出全屏（ESC）"
-              @click="exitFullscreen"
+              class="rounded-full bg-primary-50 px-2 py-1 text-xs font-medium text-primary-600 transition hover:bg-primary-100"
+              title="全屏数字人"
+              @click="enterFullscreen"
             >
-              <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              ⤢ 全屏
+            </button>
+          </div>
+        </div>
+        <p class="mt-1 text-center text-xs text-gray-400">{{ t('chat.avatarHint') }}</p>
+      </template>
+
+      <!-- 控制栏：全屏/窄屏模式 (flex 布局，不绝对定位) -->
+      <template v-else>
+        <!-- 顶栏 -->
+        <div class="avatar-topbar flex shrink-0 items-center justify-between border-b border-gray-100 px-4 py-3">
+          <button
+            @click="isFullscreen ? exitFullscreen() : toggleAvatar()"
+            class="flex h-10 items-center gap-2 rounded-full bg-gray-100 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-200"
+          >
+            <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="isFullscreen ? 'M6 18L18 6M6 6l12 12' : 'M19 9l-7 7-7-7'"/></svg>
+            {{ isFullscreen ? '退出全屏' : '关闭数字人' }}
+          </button>
+          <span class="text-sm font-medium text-gray-700">{{ t('chat.avatarPanel') }}</span>
+          <div class="flex items-center gap-2">
+            <label class="flex cursor-pointer items-center gap-1 text-xs text-gray-500">
+              <input type="checkbox" v-model="autoSpeak" class="h-3.5 w-3.5 rounded border-gray-300 text-primary-600" />
+              {{ t('chat.autoSpeak') }}
+            </label>
+          </div>
+        </div>
+
+        <!-- 底部控制区 (flex 布局，不绝对定位) -->
+        <div class="avatar-bottom flex shrink-0 flex-col items-center gap-3 border-t border-gray-100 px-4 pt-4 pb-4">
+          <!-- 按钮组 -->
+          <div class="flex items-center justify-center gap-4">
+            <!-- 停止按钮: 流式生成中时显示 -->
+            <button
+              v-if="store.streaming"
+              type="button"
+              @click="handleStop"
+              class="flex h-14 w-14 items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition hover:bg-red-600"
+            >
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
             </button>
 
-            <!-- 底部控制区域 -->
-            <div class="fs-controls bottom-controls flex flex-col items-center w-full">
-              <!-- 上行：ASR 实时字幕 -->
-              <div v-if="fullscreenPartialText || listening" class="mb-3 w-full max-w-lg text-right">
-                <p class="mb-1 text-xs text-gray-500">🎤 {{ listening ? '正在聆听...' : '语音输入' }}</p>
-                <p class="ml-auto max-w-2xl rounded-2xl rounded-br-sm bg-primary-50 px-4 py-2 text-sm text-gray-800">
-                  {{ fullscreenPartialText || '...' }}
-                </p>
-              </div>
+            <!-- 麦克风按钮: 全屏为持续监听开关，窄屏为 push-to-talk -->
+            <button
+              v-else
+              type="button"
+              @click="isFullscreen ? toggleFullscreenListening() : toggleMic()"
+              :class="[
+                'flex h-16 w-16 items-center justify-center rounded-full shadow-lg transition',
+                listening ? 'bg-red-500 text-white animate-pulse' : 'bg-primary-500 text-white hover:bg-primary-600',
+              ]"
+            >
+              <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-14 0m7 7v3m-4 0h8m-4-7a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+            </button>
 
-              <!-- 下行：数字人最新消息字幕 -->
-              <div v-if="latestAssistantText" class="mb-4 w-full max-w-lg">
-                <p class="mb-1 text-xs text-gray-500">💬 数字人</p>
-                <p class="rounded-2xl rounded-bl-sm bg-white px-4 py-2 text-sm leading-relaxed text-gray-800 shadow-sm">
-                  {{ latestAssistantText }}
-                </p>
-              </div>
-
-              <!-- 麦克风按钮 + 停止生成 -->
-              <div class="flex items-center justify-center gap-6">
-                <button
-                  v-if="store.streaming"
-                  type="button"
-                  @click="handleStop"
-                  class="fs-controls flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-white shadow-xl transition hover:bg-red-600"
-                  title="停止生成"
-                >
-                  <svg viewBox="0 0 24 24" class="h-7 w-7" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-                </button>
-                <button
-                  v-else
-                  type="button"
-                  @click="toggleFullscreenMic"
-                  :class="[
-                    'fs-controls flex h-16 w-16 items-center justify-center rounded-full shadow-xl transition',
-                    listening ? 'bg-red-500 text-white animate-pulse' : 'bg-gradient-brand text-white hover:brightness-110',
-                  ]"
-                  :title="listening ? '停止语音输入' : '开始语音输入'"
-                >
-                  <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-14 0m7 7v3m-4 0h8m-4-7a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-                </button>
-                <button
-                  type="button"
-                  @click="handleSend"
-                  :disabled="!input.trim()"
-                  class="fs-controls flex h-14 w-14 items-center justify-center rounded-full bg-gradient-brand text-white shadow-xl transition hover:brightness-110 disabled:opacity-50"
-                  title="发送消息"
-                >
-                  <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                </button>
-              </div>
-            </div>
-          </template>
-        </div>
-      </div>
-      <p v-if="!isFullscreen" class="mt-2 text-center text-xs text-gray-400">{{ t('chat.avatarHint') }}</p>
-    </aside>
-
-    <!-- 窄屏：数字人全屏浮层 -->
-    <div
-      v-if="showAvatar && isNarrow"
-      class="fixed inset-0 z-50 flex flex-col bg-black/95"
-    >
-      <!-- 顶栏：关闭 + 控制 -->
-      <div class="flex items-center justify-between px-4 py-3 text-white">
-        <button
-          @click="toggleAvatar()"
-          class="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 transition hover:bg-white/20"
-        >
-          <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-        </button>
-        <span class="text-sm font-medium">{{ t('chat.avatarPanel') }}</span>
-        <div class="flex items-center gap-2">
-          <label class="flex cursor-pointer items-center gap-1 text-xs text-white/70">
-            <input type="checkbox" v-model="autoSpeak" class="h-3.5 w-3.5 rounded border-white/30 bg-transparent text-primary-400" />
-            {{ t('chat.autoSpeak') }}
-          </label>
-        </div>
-      </div>
-
-      <!-- 数字人舞台 -->
-      <div class="flex flex-1 items-center justify-center">
-        <div
-          ref="avatarStageEl"
-          :class="[
-            'avatar-stage relative overflow-hidden mx-auto',
-            { 'is-fullscreen': isFullscreen },
-          ]"
-          style="max-height: 100%"
-        >
-          <div id="chat-avatar-container" class="h-full w-full"></div>
-          <div v-if="avatarLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/10">
-            <div class="h-8 w-8 animate-spin rounded-full border-2 border-white/30 border-t-white"></div>
-            <p class="mt-3 text-xs text-white/70">{{ t('chat.avatarLoading') }}</p>
+            <!-- 发送按钮: 所有模式均保留，用于键盘输入发送 -->
+            <button
+              type="button"
+              @click="handleSend"
+              :disabled="!input.trim()"
+              class="flex h-14 w-14 items-center justify-center rounded-full bg-primary-500 text-white shadow-lg transition hover:bg-primary-600 disabled:opacity-50"
+            >
+              <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+            </button>
           </div>
-          <div v-else-if="avatarFailed" class="absolute inset-0 flex flex-col items-center justify-center p-4 text-center">
-            <p class="text-xs text-white/70">{{ t('chat.avatarFailed') }}</p>
+
+          <!-- ASR 识别文字提示: 全屏监听中且有识别结果时显示 -->
+          <div v-if="isFullscreen && listening && fullscreenPartialText && !store.streaming" class="text-center text-xs text-gray-500">
+            <span class="mr-1 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-primary-400"></span>
+            正在聆听: {{ fullscreenPartialText }}
+          </div>
+
+          <!-- 输入框（全屏模式专用） -->
+          <div v-if="isFullscreen" class="w-full">
+            <textarea
+              v-model="input"
+              @keydown="onKeydown"
+              :placeholder="listening ? '聆听中... 直接说话或输入文字' : t('chat.placeholder')"
+              rows="1"
+              class="w-full resize-none rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 placeholder-gray-400 focus:border-primary-400 focus:outline-none"
+            />
           </div>
         </div>
-      </div>
-
-      <!-- 底部控制栏 -->
-      <div class="flex items-center justify-center gap-4 px-4 py-4">
-        <button
-          v-if="store.streaming"
-          @click="handleStop"
-          class="flex h-14 w-14 items-center justify-center rounded-full bg-red-500 text-white shadow-lg transition hover:bg-red-600"
-        >
-          <svg viewBox="0 0 24 24" class="h-6 w-6" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-        </button>
-        <button
-          v-else
-          @click="toggleMic"
-          :class="[
-            'flex h-16 w-16 items-center justify-center rounded-full shadow-lg transition',
-            listening ? 'bg-red-500 text-white animate-pulse' : 'bg-white text-primary-600 hover:bg-white/90',
-          ]"
-        >
-          <svg viewBox="0 0 24 24" class="h-7 w-7" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-14 0m7 7v3m-4 0h8m-4-7a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-        </button>
-        <button
-          @click="handleSend"
-          :disabled="!input.trim()"
-          class="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-brand text-white shadow-lg transition hover:brightness-110 disabled:opacity-50"
-        >
-          <svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-        </button>
-      </div>
-
-      <!-- 输入框 -->
-      <div class="px-4 pb-4">
-        <textarea
-          v-model="input"
-          @keydown="onKeydown"
-          :placeholder="listening ? t('chat.listening') : t('chat.placeholder')"
-          rows="1"
-          class="w-full resize-none rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm text-white placeholder-white/40 focus:border-white/40 focus:outline-none"
-        />
-      </div>
+      </template>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 浮动数字人容器 - 侧栏模式（宽屏） */
+.avatar-float--side {
+  position: relative;
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px;
+  border-left: 1px solid rgba(229, 231, 235, 0.6);
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  z-index: 10;
+}
+
+.avatar-float--side .avatar-stage {
+  width: 100%;
+  max-height: 100%;
+  flex: 1;
+  aspect-ratio: 9/16;
+}
+
+/* 浮动数字人容器 - 全屏/窄屏模式 */
+.avatar-float--full {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+}
+
+/* 全屏下舞台使用 flex-1 自适应 */
+.avatar-float--full .avatar-stage {
+  z-index: 0;
+}
+
+/* 字幕淡入/淡出动画 */
+.fade-up-enter-active,
+.fade-up-leave-active {
+  transition: all 0.3s ease;
+}
+.fade-up-enter-from {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+.fade-up-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -8px);
+}
+
+/* SDK 字幕代理渲染定位 - 基于 avatar-float 容器 */
+.sdk-subtitle.bottom-32 {
+  bottom: 8rem;
+}
+.sdk-subtitle.bottom-40 {
+  bottom: 10rem;
+}
+</style>

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     avatar_app_secret: str = ""
     avatar_gateway_server: str = "https://test-nebula-agent.xmov.ai/user/v1/ttsa_v2/session"
     avatar_default_image: str = "https://public-xmov.oss-cn-hangzhou.aliyuncs.com/avatar_sdk_material/M_CN03_show03__1080x1920__FS001__3DS16__T4__caixiangyu_15339_new.png"
+    avatar_proxy_base_url: str = ""
 
     llm_base_url: str = "https://api.deepseek.com"
     llm_api_key: str = ""

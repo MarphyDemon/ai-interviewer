@@ -1,19 +1,15 @@
 FROM python:3.12-slim
 
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
+
 WORKDIR /app
 
-# 配置 DNS 并安装依赖
 COPY server/requirements.txt .
 
-# 使用多种镜像源重试，每次失败都尝试下一个
-RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
-    pip config set global.trusted-host mirrors.aliyun.com && \
+RUN pip config set global.index-url ${PIP_INDEX_URL} && \
+    pip config set global.trusted-host ${PIP_TRUSTED_HOST} && \
     pip config set global.timeout 30 && \
-    pip install --no-cache-dir -r requirements.txt || \
-    pip install --no-cache-dir \
-      -i https://pypi.tuna.tsinghua.edu.cn/simple \
-      --trusted-host pypi.tuna.tsinghua.edu.cn \
-      -r requirements.txt || \
     pip install --no-cache-dir -r requirements.txt
 
 # 复制后端源代码

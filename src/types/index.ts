@@ -128,6 +128,14 @@ export interface AvatarConfig {
   asrConfig?: Record<string, unknown>
 }
 
+export interface BrainConfig {
+  provider: string
+  model: string
+  api_key: string
+  base_url: string
+  extra_body?: Record<string, unknown>
+}
+
 export interface KnowledgeDoc {
   id: number
   filename: string
