@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
@@ -140,9 +140,9 @@ async def get_brain_config(
 
     if settings.avatar_proxy_base_url:
         # 代理模式：创建 session token + avatar 对话
-        # SDK 会拼接 {base_url}/v1/chat/completions，所以 base_url 需包含 /v1
+        # BrainClient 会拼接 {base_url}/v1/chat/completions，所以 base_url 到 brain-proxy 即可
         token_str, conv_id = create_session_token(session, user.id)
-        proxy_base = settings.avatar_proxy_base_url.rstrip("/") + "/api/avatar/brain-proxy/v1"
+        proxy_base = settings.avatar_proxy_base_url.rstrip("/") + "/api/avatar/brain-proxy"
         return {
             "provider": "openai",
             "model": cfg.model,
@@ -189,7 +189,7 @@ class ChatCompletionRequest(BaseModel):
 async def brain_proxy_chat_completions(
     request: Request,
     session: Session = Depends(get_session),
-    authorization: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
 ):
     """SDK LLM 请求代理：校验 token → RAG 检索 → LLM 调用 → 返回标准 OpenAI SSE。"""
     # 1. 校验 token

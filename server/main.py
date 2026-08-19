@@ -12,10 +12,24 @@ if not _in_docker:
 
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
-from fastapi import FastAPI
+import json
+import uuid
+from datetime import datetime as dt
+from typing import Optional
+
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from server.database import init_db
+from fastapi.responses import StreamingResponse
+from sqlmodel import Session
+
+from server.database import engine, init_db
 from server.routers import knowledge, resume, interview, report, admin, avatar, chat, jd, auth, code, files, recordings, settings
+from server.services.avatar_brain_service import (
+    resolve_session,
+    generate_stream,
+    generate_non_stream,
+    _extract_last_user_message,
+)
 
 app = FastAPI(title="AI Interviewer API", version="0.1.0")
 
@@ -46,6 +60,139 @@ app.include_router(recordings.router)
 @app.on_event("startup")
 def on_startup():
     init_db()
+
+
+@app.post("/v1/chat/completions")
+async def root_v1_chat_completions(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+    x_api_base: Optional[str] = Header(None),
+):
+    """根级 /v1/chat/completions — 供 E2EMPServer BrainClient (localhost:8000) 调用.
+
+    两种模式：
+    1. Avatar 代理模式：Bearer token 为 avatar session token → RAG+LLM
+    2. 直连模式：Bearer token 为 LLM API key + X-Api-Base → 直接转发 LLM
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing or invalid Authorization header")
+    token_str = authorization.split(" ", 1)[1]
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON body")
+
+    messages = body.get("messages", [])
+    if not messages:
+        raise HTTPException(400, "Missing messages")
+
+    is_stream = body.get("stream", True)
+    user_message = _extract_last_user_message(messages)
+
+    # 尝试作为 avatar session token 解析
+    with Session(engine) as db:
+        resolved = resolve_session(db, token_str)
+
+    if resolved is not None:
+        # ── Avatar 代理模式：RAG+LLM ──
+        user, conv = resolved
+        print(f"[Root V1] Avatar proxy mode, conv_id={conv.id}, user_msg={user_message}")
+
+        if not user_message:
+            raise HTTPException(400, "No user message found in messages")
+
+        if is_stream:
+            return StreamingResponse(
+                generate_stream(db, conv.id, user_message),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        else:
+            return await generate_non_stream(db, conv.id, user_message)
+    else:
+        # ── 直连模式：代理到真实 LLM ──
+        if not x_api_base:
+            raise HTTPException(400, "X-Api-Base header required for direct LLM mode")
+        print(f"[Root V1] Direct LLM mode, base={x_api_base}")
+
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(base_url=x_api_base, api_key=token_str)
+
+        model = body.get("model", "gpt-3.5-turbo")
+        extra_body = body.get("extra_body", {})
+
+        if is_stream:
+            async def direct_stream():
+                chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
+                created_ts = int(dt.utcnow().timestamp())
+                try:
+                    async for chunk in client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        stream=True,
+                        **extra_body,
+                    ):
+                        delta = chunk.choices[0].delta.content or ""
+                        if delta:
+                            sse_chunk = json.dumps(
+                                {
+                                    "id": chunk_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_ts,
+                                    "model": model,
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": {"content": delta},
+                                            "finish_reason": None,
+                                        }
+                                    ],
+                                },
+                                ensure_ascii=False,
+                            )
+                            yield f"data: {sse_chunk}\n\n"
+                except Exception as e:
+                    print(f"[Root V1] Direct stream error: {e}")
+
+                final_chunk = json.dumps(
+                    {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                )
+                yield f"data: {final_chunk}\n\n"
+                yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                direct_stream(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+        else:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                stream=False,
+                **extra_body,
+            )
+            return response.model_dump()
 
 
 @app.get("/")
