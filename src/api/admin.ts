@@ -82,6 +82,34 @@ export function deleteAvatarConfig(id: number): Promise<void> {
   return client.delete(`/admin/avatar-config/${id}`)
 }
 
+export interface BrainVerifyResult {
+  brain_config: {
+    provider: string
+    base_url: string
+    model: string
+    api_key_preview: string
+  }
+  token: {
+    token_preview: string
+    conversation_id: number
+    ttl_hours: number
+  }
+  rag: {
+    knowledge_found: boolean
+    knowledge_preview: string
+  }
+  llm: {
+    ok: boolean
+    model: string
+    reply_preview: string
+    error: string | null
+  }
+}
+
+export function brainVerify(message?: string): Promise<BrainVerifyResult> {
+  return client.post('/avatar/brain-verify', { message: message || '你好，请做个自我介绍' })
+}
+
 // ---------- 用户管理（P2 新增）----------
 
 export interface UserListItem {

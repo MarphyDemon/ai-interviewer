@@ -248,3 +248,77 @@ async def brain_proxy_chat_completions(
     else:
         result = await generate_non_stream(session, conv.id, user_message)
         return result
+
+
+class BrainVerifyRequest(BaseModel):
+    message: str = "你好，请做个自我介绍"
+
+
+@router.post("/brain-verify")
+async def brain_verify(
+    payload: BrainVerifyRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """管理员验证端点：测试 RAG+LLM 代理链路是否正常。
+
+    返回详细的调试信息：brain_config 内容、RAG 检索结果摘要、LLM 响应预览。
+    """
+    from server.services.avatar_brain_service import (
+        create_session_token,
+        _retrieve_knowledge,
+        _build_system_prompt,
+    )
+
+    cfg = get_active_llm_config(session)
+    token_str, conv_id = create_session_token(session, user.id)
+
+    knowledge = await _retrieve_knowledge(payload.message)
+    system_prompt = _build_system_prompt(knowledge)
+
+    # 简单 LLM 调用测试（非流式，取前 200 字符预览）
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+        llm_response = await client.chat.completions.create(
+            model=cfg.model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": payload.message},
+            ],
+            stream=False,
+            max_tokens=500,
+        )
+        reply_preview = (llm_response.choices[0].message.content or "")[:200]
+        llm_ok = True
+        llm_error = None
+    except Exception as e:
+        reply_preview = ""
+        llm_ok = False
+        llm_error = str(e)
+
+    proxy_base = settings.avatar_proxy_base_url or "(未配置，本地开发模式)"
+
+    return {
+        "brain_config": {
+            "provider": "openai" if settings.avatar_proxy_base_url else "direct",
+            "base_url": proxy_base,
+            "model": cfg.model,
+            "api_key_preview": cfg.api_key[:8] + "..." if len(cfg.api_key) > 8 else "***",
+        },
+        "token": {
+            "token_preview": token_str[:16] + "..." if len(token_str) > 16 else token_str,
+            "conversation_id": conv_id,
+            "ttl_hours": 24,
+        },
+        "rag": {
+            "knowledge_found": bool(knowledge),
+            "knowledge_preview": knowledge[:300] if knowledge else "(无检索结果)",
+        },
+        "llm": {
+            "ok": llm_ok,
+            "model": cfg.model,
+            "reply_preview": reply_preview,
+            "error": llm_error,
+        },
+    }

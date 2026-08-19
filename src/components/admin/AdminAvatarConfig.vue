@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as adminApi from '@/api/admin'
-import type { AvatarProviderConfigItem } from '@/api/admin'
+import type { AvatarProviderConfigItem, BrainVerifyResult } from '@/api/admin'
 
 const { t } = useI18n()
 
@@ -98,6 +98,26 @@ async function removeAvatarConfig(id: number) {
     await fetchAvatarConfigs()
   } catch (e: any) {
     alert(e.message)
+  }
+}
+
+// ---------- Brain Config 验证 ----------
+const verifyMessage = ref('你好，请做个自我介绍')
+const verifyLoading = ref(false)
+const verifyResult = ref<BrainVerifyResult | null>(null)
+const verifyError = ref<string | null>(null)
+const showVerify = ref(false)
+
+async function runVerify() {
+  verifyLoading.value = true
+  verifyResult.value = null
+  verifyError.value = null
+  try {
+    verifyResult.value = await adminApi.brainVerify(verifyMessage.value)
+  } catch (e: any) {
+    verifyError.value = e.message || '验证请求失败'
+  } finally {
+    verifyLoading.value = false
   }
 }
 </script>
@@ -202,6 +222,116 @@ async function removeAvatarConfig(id: number) {
           >
             {{ t('common.delete') }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Brain Config 验证 -->
+    <div class="border-t border-gray-100 pt-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-gray-700">🧠 Brain Config 链路验证</h3>
+        <button
+          @click="showVerify = !showVerify"
+          class="text-xs text-primary-500 hover:text-primary-600"
+        >
+          {{ showVerify ? '收起' : '展开' }}
+        </button>
+      </div>
+
+      <div v-if="showVerify" class="mt-3 space-y-3">
+        <div class="flex gap-2">
+          <input
+            v-model="verifyMessage"
+            placeholder="输入测试消息..."
+            class="flex-1 rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100"
+          />
+          <button
+            @click="runVerify"
+            :disabled="verifyLoading"
+            class="rounded-lg bg-gradient-brand px-4 py-2 text-sm text-white transition hover:brightness-110 disabled:opacity-50"
+          >
+            {{ verifyLoading ? '验证中...' : '🚀 验证' }}
+          </button>
+        </div>
+
+        <div v-if="verifyError" class="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          ❌ {{ verifyError }}
+        </div>
+
+        <div v-if="verifyResult" class="space-y-3">
+          <!-- Brain Config -->
+          <div class="rounded-lg bg-gray-50 p-3">
+            <div class="mb-2 flex items-center gap-2">
+              <span class="text-xs font-medium text-gray-500">Brain Config</span>
+              <span class="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                {{ verifyResult.brain_config.provider }}
+              </span>
+            </div>
+            <div class="space-y-1 text-xs">
+              <div class="flex gap-2">
+                <span class="w-20 text-gray-400">Base URL</span>
+                <span class="break-all text-gray-700">{{ verifyResult.brain_config.base_url }}</span>
+              </div>
+              <div class="flex gap-2">
+                <span class="w-20 text-gray-400">Model</span>
+                <span class="text-gray-700">{{ verifyResult.brain_config.model }}</span>
+              </div>
+              <div class="flex gap-2">
+                <span class="w-20 text-gray-400">API Key</span>
+                <span class="font-mono text-gray-500">{{ verifyResult.brain_config.api_key_preview }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Token -->
+          <div class="rounded-lg bg-gray-50 p-3">
+            <div class="mb-2 text-xs font-medium text-gray-500">Session Token</div>
+            <div class="space-y-1 text-xs">
+              <div class="flex gap-2">
+                <span class="w-20 text-gray-400">Token</span>
+                <span class="break-all font-mono text-gray-700">{{ verifyResult.token.token_preview }}</span>
+              </div>
+              <div class="flex gap-2">
+                <span class="w-20 text-gray-400">Conv ID</span>
+                <span class="text-gray-700">#{{ verifyResult.token.conversation_id }}</span>
+              </div>
+              <div class="flex gap-2">
+                <span class="w-20 text-gray-400">TTL</span>
+                <span class="text-gray-700">{{ verifyResult.token.ttl_hours }} 小时</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- RAG -->
+          <div class="rounded-lg bg-gray-50 p-3">
+            <div class="mb-2 flex items-center gap-2">
+              <span class="text-xs font-medium text-gray-500">RAG 检索</span>
+              <span
+                :class="verifyResult.rag.knowledge_found ? 'text-green-600' : 'text-gray-400'"
+                class="text-xs"
+              >
+                {{ verifyResult.rag.knowledge_found ? '✅ 命中知识库' : '⚠️ 无检索结果' }}
+              </span>
+            </div>
+            <p class="whitespace-pre-wrap break-all text-xs text-gray-600">{{ verifyResult.rag.knowledge_preview }}</p>
+          </div>
+
+          <!-- LLM -->
+          <div class="rounded-lg bg-gray-50 p-3">
+            <div class="mb-2 flex items-center gap-2">
+              <span class="text-xs font-medium text-gray-500">LLM 响应</span>
+              <span
+                :class="verifyResult.llm.ok ? 'text-green-600' : 'text-red-600'"
+                class="text-xs"
+              >
+                {{ verifyResult.llm.ok ? '✅ 正常' : '❌ 失败' }}
+              </span>
+            </div>
+            <div v-if="verifyResult.llm.error" class="mb-2 rounded bg-red-50 p-2 font-mono text-xs text-red-700">
+              {{ verifyResult.llm.error }}
+            </div>
+            <p class="whitespace-pre-wrap break-all text-xs text-gray-700">{{ verifyResult.llm.reply_preview || '(无响应)' }}</p>
+          </div>
         </div>
       </div>
     </div>
