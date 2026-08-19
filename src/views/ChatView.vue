@@ -68,6 +68,23 @@ watch(
   () => scrollToBottom(),
 )
 
+// 窗口尺寸变化时，重新初始化数字人 SDK（容器位置变了）
+watch(isNarrow, async () => {
+  if (!showAvatar.value) return
+  avatarLoading.value = true
+  avatarFailed.value = false
+  try {
+    await destroyAvatar()
+    await nextTick()
+    await initAvatar('chat-avatar-container')
+  } catch (e) {
+    console.warn('[Chat Avatar] re-init failed:', e)
+    avatarFailed.value = true
+  } finally {
+    avatarLoading.value = false
+  }
+})
+
 async function scrollToBottom() {
   await nextTick()
   if (messagesEl.value) {
@@ -492,11 +509,11 @@ async function handleDelete(id: number) {
       </div>
     </main>
 
-    <!-- 右：数字人侧栏（TTS 播报 / ASR 输入） -->
+    <!-- 右：数字人侧栏（TTS 播报 / ASR 输入）—— 仅宽屏显示 -->
     <aside
-      v-if="showAvatar"
+      v-if="showAvatar && !isNarrow"
       :class="{ 'backdrop-blur': !isFullscreen, 'bg-white/60': !isFullscreen }"
-      class="hidden w-80 shrink-0 flex-col items-center border-l border-primary-100/60 p-4 lg:flex"
+      class="flex w-80 shrink-0 flex-col items-center border-l border-primary-100/60 p-4"
     >
       <div class="mb-3 flex items-center justify-between">
         <p class="text-sm font-semibold text-gray-700">{{ t('chat.avatarPanel') }}</p>
