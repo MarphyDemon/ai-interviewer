@@ -221,24 +221,8 @@ async def brain_proxy_chat_completions(
 
     # 4. 流式或非流式
     if is_stream:
-        async def event_stream():
-            async for delta in generate_stream(session, conv.id, user_message):
-                chunk = json.dumps(
-                    {
-                        "choices": [
-                            {
-                                "delta": {"content": delta},
-                                "finish_reason": None,
-                            }
-                        ]
-                    },
-                    ensure_ascii=False,
-                )
-                yield f"data: {chunk}\n\n"
-            yield "data: [DONE]\n\n"
-
         return StreamingResponse(
-            event_stream(),
+            generate_stream(session, conv.id, user_message),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

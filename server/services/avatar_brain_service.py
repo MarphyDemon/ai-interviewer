@@ -154,35 +154,45 @@ async def generate_stream(
     """流式生成：RAG 检索 → 调用 LLM → 输出标准 OpenAI SSE chunk。
 
     使用独立 session 操作数据库，避免依赖注入的 session 在异步流期间被关闭。
+    输出格式完全兼容 OpenAI SSE，包括 finish_reason + usage 的最终 chunk。
     """
     from server.database import engine
     import uuid
     from datetime import datetime as dt
+    from openai import AsyncOpenAI
 
-    # 持久化用户消息
-    session.add(
-        ChatMessage(conversation_id=conversation_id, role="user", content=user_message)
-    )
-    conv = session.get(ChatConversation, conversation_id)
-    if conv and (not conv.title or conv.title == "新对话"):
-        conv.title = user_message[:20] + ("…" if len(user_message) > 20 else "")
-    session.commit()
+    # 使用独立 session 持久化用户消息（避免依赖注入的 session 被提前关闭）
+    with Session(engine) as db:
+        db.add(
+            ChatMessage(conversation_id=conversation_id, role="user", content=user_message)
+        )
+        conv = db.get(ChatConversation, conversation_id)
+        if conv and (not conv.title or conv.title == "新对话"):
+            conv.title = user_message[:20] + ("…" if len(user_message) > 20 else "")
+        db.commit()
+        db.refresh(conv)
 
-    # RAG 检索
-    knowledge = await _retrieve_knowledge(user_message)
-    messages = _build_messages(session, conversation_id, user_message, knowledge)
+        # RAG 检索
+        knowledge = await _retrieve_knowledge(user_message)
+        messages = _build_messages(db, conversation_id, user_message, knowledge)
 
-    cfg = get_active_llm_config(session)
+        cfg = get_active_llm_config(db)
+
     client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
 
     full_response = ""
     chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
     created_ts = int(dt.utcnow().timestamp())
+    usage_info = None
 
     try:
         async for chunk in client.chat.completions.create(
             model=cfg.model, messages=messages, stream=True
         ):
+            # 收集 usage 信息
+            if hasattr(chunk, "usage") and chunk.usage is not None:
+                usage_info = chunk.usage
+
             delta = chunk.choices[0].delta.content or ""
             if delta:
                 full_response += delta
@@ -206,7 +216,31 @@ async def generate_stream(
     except Exception as e:
         print(f"[Avatar Brain] Stream error: {e}")
     finally:
-        # 发送 [DONE] 确保 SDK 正常关闭流
+        # 发送 finish_reason + usage 的最终 chunk（供 SDK 侧 BrainClient 识别结束）
+        usage_dict = {
+            "prompt_tokens": usage_info.prompt_tokens if usage_info else 0,
+            "completion_tokens": usage_info.completion_tokens if usage_info else 0,
+            "total_tokens": usage_info.total_tokens if usage_info else 0,
+        }
+        final_chunk = json.dumps(
+            {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": cfg.model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": usage_dict,
+            },
+            ensure_ascii=False,
+        )
+        yield f"data: {final_chunk}\n\n"
+        # [DONE] 作为兜底
         yield "data: [DONE]\n\n"
 
         # 持久化 assistant 回复
@@ -234,19 +268,20 @@ async def generate_non_stream(
     user_message: str,
 ) -> dict:
     """非流式生成：RAG 检索 → 调用 LLM → 返回完整 JSON 响应。"""
-    session.add(
-        ChatMessage(conversation_id=conversation_id, role="user", content=user_message)
-    )
-
-    conv = session.get(ChatConversation, conversation_id)
-    if conv and (not conv.title or conv.title == "新对话"):
-        conv.title = user_message[:20] + ("…" if len(user_message) > 20 else "")
-
-    knowledge = await _retrieve_knowledge(user_message)
-    messages = _build_messages(session, conversation_id, user_message, knowledge)
-
-    cfg = get_active_llm_config(session)
+    from server.database import engine
     from openai import AsyncOpenAI
+
+    with Session(engine) as db:
+        db.add(
+            ChatMessage(conversation_id=conversation_id, role="user", content=user_message)
+        )
+        conv = db.get(ChatConversation, conversation_id)
+        if conv and (not conv.title or conv.title == "新对话"):
+            conv.title = user_message[:20] + ("…" if len(user_message) > 20 else "")
+
+        knowledge = await _retrieve_knowledge(user_message)
+        messages = _build_messages(db, conversation_id, user_message, knowledge)
+        cfg = get_active_llm_config(db)
 
     client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
     response = await client.chat.completions.create(
@@ -256,15 +291,17 @@ async def generate_non_stream(
     full_response = response.choices[0].message.content or ""
 
     if full_response:
-        session.add(
-            ChatMessage(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=full_response,
+        with Session(engine) as db:
+            db.add(
+                ChatMessage(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=full_response,
+                )
             )
-        )
-        if conv:
-            conv.updated_at = datetime.utcnow()
-        session.commit()
+            conv_ref = db.get(ChatConversation, conversation_id)
+            if conv_ref:
+                conv_ref.updated_at = datetime.utcnow()
+            db.commit()
 
     return response.model_dump()
