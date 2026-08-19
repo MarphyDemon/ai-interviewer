@@ -5,7 +5,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from server.database import get_session, engine
-from server.models import ChatConversation, ChatMessage, User
+from server.models import ChatConversation, ChatMessage, User, AvatarSessionToken
 from server.services.auth_service import get_current_user
 from server.services.chat_service import stream_chat
 
@@ -91,6 +91,14 @@ def delete_conversation(conv_id: int, session: Session = Depends(get_session), u
     conv = session.get(ChatConversation, conv_id)
     if not conv or conv.user_id != user.id:
         raise HTTPException(404, "Conversation not found")
+
+    tokens = session.exec(
+        select(AvatarSessionToken).where(AvatarSessionToken.conversation_id == conv_id)
+    ).all()
+    for t in tokens:
+        session.delete(t)
+    session.flush()
+
     msgs = session.exec(
         select(ChatMessage).where(ChatMessage.conversation_id == conv_id)
     ).all()

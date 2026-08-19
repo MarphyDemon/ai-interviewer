@@ -140,12 +140,14 @@ async def get_brain_config(
 
     if settings.avatar_proxy_base_url:
         # 代理模式：创建 session token + avatar 对话
+        # SDK 会拼接 {base_url}/v1/chat/completions，所以 base_url 需包含 /v1
         token_str, conv_id = create_session_token(session, user.id)
+        proxy_base = settings.avatar_proxy_base_url.rstrip("/") + "/api/avatar/brain-proxy/v1"
         return {
-            "provider": "custom",
+            "provider": "openai",
             "model": cfg.model,
             "api_key": token_str,
-            "base_url": settings.avatar_proxy_base_url.rstrip("/") + "/api/avatar/brain-proxy",
+            "base_url": proxy_base,
             "extra_body": {
                 "temperature": 0.7,
             },
@@ -183,6 +185,7 @@ class ChatCompletionRequest(BaseModel):
 
 
 @router.post("/brain-proxy/chat/completions")
+@router.post("/brain-proxy/v1/chat/completions")
 async def brain_proxy_chat_completions(
     request: Request,
     session: Session = Depends(get_session),
