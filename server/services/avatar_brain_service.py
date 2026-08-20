@@ -31,18 +31,28 @@ from server.services.common import get_active_llm_config
 TOKEN_TTL_HOURS = 24
 
 
-def create_session_token(session: Session, user_id: int) -> tuple[str, int]:
-    """为用户创建 avatar 会话 token + 专属对话。返回 (token, conversation_id)。
+def create_session_token(
+    session: Session,
+    user_id: int,
+    conversation_id: Optional[int] = None,
+) -> tuple[str, int]:
+    """为用户创建 avatar 会话 token。返回 (token, conversation_id)。
 
-    每次调用都会创建新的 token 和对话；旧 token 可保留至过期。
+    如果传入 conversation_id，则绑定到已有会话；否则创建新的"数字人对话"。
+    每次调用都会创建新的 token；旧 token 可保留至过期。
     """
-    conv = ChatConversation(
-        user_id=user_id,
-        title="数字人对话",
-    )
-    session.add(conv)
-    session.commit()
-    session.refresh(conv)
+    if conversation_id is not None:
+        conv = session.get(ChatConversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            raise ValueError(f"Conversation {conversation_id} not found or not owned by user")
+    else:
+        conv = ChatConversation(
+            user_id=user_id,
+            title="数字人对话",
+        )
+        session.add(conv)
+        session.commit()
+        session.refresh(conv)
 
     token_str = secrets.token_hex(32)
     expires_at = datetime.utcnow() + timedelta(hours=TOKEN_TTL_HOURS)
@@ -186,7 +196,7 @@ async def generate_stream(
     usage_info = None
 
     try:
-        async for chunk in client.chat.completions.create(
+        async for chunk in await client.chat.completions.create(
             model=cfg.model, messages=messages, stream=True
         ):
             # 收集 usage 信息

@@ -1,4 +1,4 @@
-import type { ASRResult, BrainConfig } from '@/types'
+import type { AgentLLMResponse, ASRResult, BrainConfig } from '@/types'
 
 export interface AvatarProvider {
   init(containerId: string, brainConfig?: BrainConfig): Promise<void>
@@ -21,4 +21,6 @@ export interface AvatarProvider {
   resize?(): void
   /** 设置数字人字幕显示回调：on 为 true 显示字幕，false 隐藏 */
   setOnSubtitle?(callback: (text: string | null, on: boolean) => void): void
+  /** 设置 LLM 响应回调：SDK 收到 chunk/done 时触发 */
+  setOnLLMResponse?(callback: (response: AgentLLMResponse) => void): void
 }

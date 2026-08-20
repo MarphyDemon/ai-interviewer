@@ -1,6 +1,10 @@
 import os
 import sys
+import json
+import uuid
+from datetime import datetime as dt
 from pathlib import Path
+from typing import Optional
 
 # 添加 py_deps（沙箱环境下 pip 安装的依赖）
 # Docker 环境下跳过，因为依赖已通过 pip 安装且 py_deps 中的二进制文件不兼容
@@ -11,11 +15,6 @@ if not _in_docker:
         sys.path.insert(0, str(_py_deps))
 
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
-
-import json
-import uuid
-from datetime import datetime as dt
-from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,7 +129,7 @@ async def root_v1_chat_completions(
                 chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
                 created_ts = int(dt.utcnow().timestamp())
                 try:
-                    async for chunk in client.chat.completions.create(
+                    async for chunk in await client.chat.completions.create(
                         model=model,
                         messages=messages,
                         stream=True,

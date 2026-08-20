@@ -2,14 +2,14 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from server.config import settings
 from server.database import get_session
-from server.models import AvatarProviderConfig, AvatarSessionToken, LLMConfig, User
+from server.models import AvatarProviderConfig, AvatarSessionToken, ChatConversation, LLMConfig, User
 from server.services.crypto_service import decrypt
 from server.services.auth_service import get_current_user
 from server.services.common import get_active_llm_config
@@ -127,22 +127,32 @@ async def set_avatar_preference(
 async def get_brain_config(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
+    conversation_id: Optional[int] = Query(None, description="绑定的会话 ID"),
 ):
     """返回 SDK brain_config 格式的配置。
 
     两种模式：
     1. 代理模式（avatar_proxy_base_url 已配置）：返回代理 URL + session token，
        SDK 请求走 RAG+LLM 流水线。
+       如果传入 conversation_id，token 绑定到已有会话；否则创建新会话。
     2. 直连模式（未配置 avatar_proxy_base_url）：返回真实 LLM 供应商配置，
        SDK 直接请求 LLM 供应商（本地开发友好）。
     """
     cfg = get_active_llm_config(session)
 
     if settings.avatar_proxy_base_url:
-        # 代理模式：创建 session token + avatar 对话
-        # BrainClient 会拼接 {base_url}/v1/chat/completions，所以 base_url 到 brain-proxy 即可
-        token_str, conv_id = create_session_token(session, user.id)
-        proxy_base = settings.avatar_proxy_base_url.rstrip("/") + "/api/avatar/brain-proxy"
+        # 代理模式：创建 session token
+        # 如果前端指定了 conversation_id，则绑定到该会话，避免创建重复会话
+        try:
+            token_str, conv_id = create_session_token(session, user.id, conversation_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+
+        conv = session.get(ChatConversation, conv_id)
+        conv_title = conv.title if conv else "数字人对话"
+        conv_created = conv.created_at.isoformat() if conv and conv.created_at else None
+
+        proxy_base = settings.avatar_proxy_base_url.rstrip("/") + "/api/avatar/brain-proxy/v1"
         return {
             "provider": "openai",
             "model": cfg.model,
@@ -150,6 +160,11 @@ async def get_brain_config(
             "base_url": proxy_base,
             "extra_body": {
                 "temperature": 0.7,
+            },
+            "conversation": {
+                "id": conv_id,
+                "title": conv_title,
+                "created_at": conv_created,
             },
         }
     else:
@@ -194,13 +209,16 @@ async def brain_proxy_chat_completions(
     """SDK LLM 请求代理：校验 token → RAG 检索 → LLM 调用 → 返回标准 OpenAI SSE。"""
     # 1. 校验 token
     if not authorization or not authorization.startswith("Bearer "):
+        print(f"[Brain Proxy] WARN: Missing/invalid Authorization header. headers={dict(request.headers)}")
         raise HTTPException(401, "Missing authorization")
     token_str = authorization.split(" ", 1)[1]
 
     resolved = resolve_session(session, token_str)
     if resolved is None:
+        print(f"[Brain Proxy] WARN: Session token not found or expired. token={token_str[:16]}...")
         raise HTTPException(401, "Invalid or expired session token")
     user, conv = resolved
+    print(f"[Brain Proxy] Auth OK: user={user.id}, conv={conv.id}")
 
     # 2. 解析请求体
     try:

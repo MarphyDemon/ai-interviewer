@@ -5,8 +5,9 @@ export function getAvatarConfig(): Promise<AvatarConfig> {
   return client.get('/avatar/config')
 }
 
-export function getBrainConfig(): Promise<BrainConfig> {
-  return client.get('/avatar/brain-config')
+export function getBrainConfig(conversationId?: number): Promise<BrainConfig> {
+  const params = conversationId ? `?conversation_id=${conversationId}` : ''
+  return client.get(`/avatar/brain-config${params}`)
 }
 
 export interface HomepageAvatarItem {

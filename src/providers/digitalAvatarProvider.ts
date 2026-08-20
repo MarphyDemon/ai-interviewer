@@ -1,15 +1,17 @@
 import XingyunAvatarAgent from '@xmov/avatar/agent'
 import type { AvatarProvider } from './avatarProvider'
-import type { ASRResult, BrainConfig } from '@/types'
+import type { AgentLLMResponse, ASRResult, BrainConfig } from '@/types'
 import { getAvatarConfig } from '@/api/avatar'
 import type { AvatarConfig } from '@/types'
 
 type ASRCallback = (result: ASRResult) => void
+type LLMResponseCallback = (response: AgentLLMResponse) => void
 
 export class DigitalAvatarProvider implements AvatarProvider {
   private agent: XingyunAvatarAgent | null = null
   private ready = false
   private asrCallback: ASRCallback | null = null
+  private llmResponseCallback: LLMResponseCallback | null = null
   private subtitleCallback: ((text: string | null, on: boolean) => void) | null = null
   private config: AvatarConfig | null = null
   private brainConfig: BrainConfig | null = null
@@ -91,9 +93,26 @@ export class DigitalAvatarProvider implements AvatarProvider {
       },
       agentCallbacks: {
         onASRResult: (result: any) => {
-          console.log(result)
           if (this.asrCallback) {
             this.asrCallback({ text: result.text, isFinal: result.isFinal })
+          }
+        },
+        onLLMResponse: (event: any) => {
+          if (this.llmResponseCallback) {
+            const response: AgentLLMResponse = {
+              event: event.event,
+              ...(typeof event.text === 'string' ? { text: event.text } : {}),
+              ...(event.is_first === true ? { isFirst: true } : {}),
+              ...(event.usage ? {
+                usage: {
+                  promptTokens: event.usage.prompt_tokens ?? 0,
+                  completionTokens: event.usage.completion_tokens ?? 0,
+                  totalTokens: event.usage.total_tokens ?? 0,
+                  cachedTokens: event.usage.cached_tokens ?? 0,
+                },
+              } : {}),
+            }
+            this.llmResponseCallback(response)
           }
         },
         onAgentStateChange: (state: string) => {
@@ -224,6 +243,11 @@ export class DigitalAvatarProvider implements AvatarProvider {
   /** 注册字幕显示回调，用于 SDK 代理 subtitle_on / subtitle_off 事件 */
   setOnSubtitle(callback: (text: string | null, on: boolean) => void): void {
     this.subtitleCallback = callback
+  }
+
+  /** 注册 LLM 响应回调，用于 SDK onLLMResponse 事件 */
+  setOnLLMResponse(callback: (response: AgentLLMResponse) => void): void {
+    this.llmResponseCallback = callback
   }
 
   async destroy(): Promise<void> {

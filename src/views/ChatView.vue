@@ -5,10 +5,11 @@ import { useChatStore } from '@/stores/chat'
 import { useAvatar } from '@/composables/useAvatar'
 import { useDevice } from '@/composables/useDevice'
 import { renderMarkdown } from '@/utils/markdown'
+import type { AgentLLMResponse } from '@/types'
 
 const { t } = useI18n()
 const store = useChatStore()
-const { initAvatar, getProvider, destroyAvatar } = useAvatar()
+const { initAvatar, getProvider, destroyAvatar, lastBrainConfig } = useAvatar()
 const { isMobile, windowWidth } = useDevice()
 
 const isNarrow = computed(() => windowWidth.value < 1024)
@@ -27,6 +28,9 @@ const listening = ref(false)
 const speaking = ref(false)
 const speakBuffer = ref('')
 const streamAborted = ref(false)
+const avatarConversationId = ref<number | null>(null)
+const avatarPendingAssistantId = ref<number | null>(null)
+const avatarResponseBuffer = ref('')
 
 // 全屏状态
 const avatarStageEl = ref<HTMLElement | null>(null)
@@ -112,6 +116,18 @@ watch(() => store.streaming, async (streaming) => {
   } else if (!isRestartingFromSend) {
     // 正常停止/异常中断后，重启 ASR（排除 send 流程自身触发的 streaming 变化）
     startFullscreenASR()
+  }
+})
+
+// 切换会话时销毁数字人（避免消息写错会话）
+watch(() => store.currentId, async (newId, oldId) => {
+  if (showAvatar.value && newId !== oldId && oldId !== null) {
+    stopSpeaking()
+    stopListening()
+    await destroyAvatar()
+    showAvatar.value = false
+    avatarFailed.value = false
+    avatarConversationId.value = null
   }
 })
 
@@ -222,17 +238,39 @@ async function toggleAvatar() {
     await destroyAvatar()
     showAvatar.value = false
     avatarFailed.value = false
+    avatarConversationId.value = null
     return
   }
+
+  // 确保有选中的会话（无则自动创建）
+  if (!store.currentId) {
+    await store.newConversation()
+  }
+  const convId = store.currentId!
+
   showAvatar.value = true
   avatarLoading.value = true
   avatarFailed.value = false
+  avatarConversationId.value = convId
   await nextTick()
+
   try {
-    await initAvatar('chat-avatar-container')
+    // 传递 conversationId，让后端绑定到当前会话
+    const provider = await initAvatar('chat-avatar-container', convId)
     observeAvatarResize()
-    const provider = getProvider()
-    if (provider?.setOnSubtitle) {
+
+    // 如果后端返回了新会话（conversation_id 不同），则选中它
+    if (lastBrainConfig.value?.conversation) {
+      const backendConvId = lastBrainConfig.value.conversation.id
+      if (backendConvId !== convId) {
+        avatarConversationId.value = backendConvId
+        // 选中新会话并加载消息
+        await store.selectConversation(backendConvId)
+      }
+    }
+
+    // 注册字幕回调
+    if (provider.setOnSubtitle) {
       provider.setOnSubtitle((text, on) => {
         if (on && text) {
           sdkSubtitleText.value = text
@@ -242,11 +280,51 @@ async function toggleAvatar() {
         }
       })
     }
+
+    // 注册 LLM 响应回调（SDK → 前端实时展示）
+    if (provider.setOnLLMResponse) {
+      provider.setOnLLMResponse(handleAvatarLLMResponse)
+    }
   } catch (e) {
     console.warn('[Chat Avatar] init failed:', e)
     avatarFailed.value = true
   } finally {
     avatarLoading.value = false
+  }
+}
+
+/** 处理数字人 LLM 响应（SDK 回调 → 前端实时展示） */
+function handleAvatarLLMResponse(response: AgentLLMResponse) {
+  if (response.event === 'chunk' && response.text) {
+    // 流式追加：创建或追加到 assistant 消息
+    let assistantMsgId = avatarPendingAssistantId.value
+    if (assistantMsgId) {
+      const msg = store.currentMessages.find(m => m.id === assistantMsgId)
+      if (msg) {
+        msg.content += response.text
+        avatarResponseBuffer.value += response.text
+        scrollToBottom()
+        return
+      }
+    }
+    // 新建 assistant 消息
+    const newId = Date.now() + Math.floor(Math.random() * 1000)
+    avatarPendingAssistantId.value = newId
+    avatarResponseBuffer.value = response.text
+    store.currentMessages.push({
+      id: newId,
+      role: 'assistant',
+      content: response.text,
+      createdAt: new Date().toISOString(),
+    })
+    scrollToBottom()
+  } else if (response.event === 'done') {
+    // LLM 回复完成 → 从 DB 同步最终结果
+    avatarPendingAssistantId.value = null
+    avatarResponseBuffer.value = ''
+    if (avatarConversationId.value) {
+      store.selectConversation(avatarConversationId.value)
+    }
   }
 }
 
@@ -279,7 +357,18 @@ function toggleMic() {
   listening.value = true
   provider.startASR((result) => {
     if (result.isFinal && result.text) {
-      input.value = (input.value + ' ' + result.text).trim()
+      if (showAvatar.value && avatarConversationId.value) {
+        // 数字人激活时：用户语音消息直接显示（SDK brain_config 会处理 LLM）
+        store.currentMessages.push({
+          id: Date.now(),
+          role: 'user',
+          content: result.text,
+          createdAt: new Date().toISOString(),
+        })
+        scrollToBottom()
+      } else {
+        input.value = (input.value + ' ' + result.text).trim()
+      }
     }
   }).catch(() => {
     listening.value = false
@@ -313,7 +402,16 @@ async function startFullscreenASR() {
           const msg = result.text.trim()
           fullscreenPartialText.value = msg
           if (!msg) return
-          if (store.streaming) {
+          if (showAvatar.value && avatarConversationId.value) {
+            // 数字人激活时：用户语音消息直接显示（SDK brain_config 处理 LLM）
+            store.currentMessages.push({
+              id: Date.now(),
+              role: 'user',
+              content: msg,
+              createdAt: new Date().toISOString(),
+            })
+            scrollToBottom()
+          } else if (store.streaming) {
             // 自动打断 (Plan A)
             pendingFullscreenMessage.value = msg
             streamAborted.value = true

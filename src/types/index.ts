@@ -134,6 +134,23 @@ export interface BrainConfig {
   api_key: string
   base_url: string
   extra_body?: Record<string, unknown>
+  conversation?: {
+    id: number
+    title: string
+    created_at: string | null
+  }
+}
+
+export interface AgentLLMResponse {
+  event: 'chunk' | 'done'
+  text?: string
+  isFirst?: boolean
+  usage?: {
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+    cachedTokens: number
+  }
 }
 
 export interface KnowledgeDoc {

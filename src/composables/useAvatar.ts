@@ -11,6 +11,7 @@ import type { BrainConfig } from '@/types'
 
 const avatarProvider = ref<AvatarProvider | null>(null)
 const isDigital = ref(false)
+const lastBrainConfig = ref<BrainConfig | null>(null)
 
 function supportsWebGL2(): boolean {
   try {
@@ -26,7 +27,7 @@ function supportsWebCodecs(): boolean {
 }
 
 export function useAvatar() {
-  async function initAvatar(containerId: string): Promise<AvatarProvider> {
+  async function initAvatar(containerId: string, conversationId?: number): Promise<AvatarProvider> {
     const host = detectHost()
     const { isMobile } = useDevice()
 
@@ -44,7 +45,8 @@ export function useAvatar() {
       try {
         let brainConfig: BrainConfig | undefined
         try {
-          brainConfig = await getBrainConfig()
+          brainConfig = await getBrainConfig(conversationId)
+          lastBrainConfig.value = brainConfig ?? null
         } catch {
           console.warn('[Avatar] Failed to fetch brain-config, SDK will use default behavior')
         }
@@ -82,5 +84,5 @@ export function useAvatar() {
     }
   }
 
-  return { initAvatar, getProvider, destroyAvatar, isDigital }
+  return { initAvatar, getProvider, destroyAvatar, isDigital, lastBrainConfig }
 }

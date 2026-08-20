@@ -110,6 +110,11 @@ export class LottieAvatarProvider implements AvatarProvider {
     // no-op：浏览器 DOM 尺寸变化自动生效
   }
 
+  /** Lottie 降级模式下无 SDK LLM 响应，空实现 */
+  setOnLLMResponse(_callback: (response: import('@/types').AgentLLMResponse) => void): void {
+    // no-op
+  }
+
   async destroy(): Promise<void> {
     if (this.container) {
       this.container.innerHTML = ''
