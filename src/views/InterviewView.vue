@@ -9,8 +9,9 @@ import { useDevice } from '@/composables/useDevice'
 import { useMediaRecorder } from '@/composables/useMediaRecorder'
 import { WebSpeechAsrProvider } from '@/providers/webSpeechAsrProvider'
 import { getLanguages, type LanguageItem } from '@/api/code'
+import { createInterviewAvatarSession } from '@/api/interview'
 import { renderMarkdown } from '@/utils/markdown'
-import type { ASRResult } from '@/types'
+import type { ASRResult, BrainConfig } from '@/types'
 import type { AvatarProvider } from '@/providers/avatarProvider'
 
 const { t } = useI18n()
@@ -157,7 +158,20 @@ onMounted(async () => {
   console.log(document.getElementById(avatarContainerId))
 
   try {
-    avatarProvider.value = await initAvatar(avatarContainerId)
+    // 签发面试专用 brain_config：让 SDK 的 LLM 请求命中「面试官大脑」而非聊天链路
+    let brainConfig: BrainConfig | undefined
+    if (store.interviewId) {
+      try {
+        brainConfig = await createInterviewAvatarSession(store.interviewId)
+      } catch (e) {
+        console.warn('[Interview] avatar-session 签发失败，回落到默认 brain 配置:', e)
+      }
+    }
+    // sessionSpeakReqId=0：开场白由面试编排给出，避免 SDK 自动开场造成重复
+    avatarProvider.value = await initAvatar(avatarContainerId, {
+      brainConfig,
+      sessionSpeakReqId: 0,
+    })
     const provider = getProvider()
     if (provider) {
       await speakCurrentQuestion()
@@ -241,7 +255,16 @@ async function stopVoice() {
   }
   const finalText = asrResults.value.trim()
   if (finalText) {
-    await submitAnswer(finalText)
+    if (isDigital.value) {
+      // 数字人模式：语音已由 SDK 直接送入「面试官大脑」，回复会自动播报，
+      // 这里只把识别文本落到本地聊天记录，避免重复生成与重复播报。
+      store.addMessage('user', finalText)
+      await nextTick()
+      scrollToBottom()
+    } else {
+      // 降级模式：走既有命令式编排（后端返回 action/content 后播报）
+      await submitAnswer(finalText)
+    }
   }
   asrResults.value = ''
   partialText.value = ''

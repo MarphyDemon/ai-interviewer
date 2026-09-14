@@ -20,6 +20,11 @@ from server.services.avatar_brain_service import (
     generate_non_stream,
     _extract_last_user_message,
 )
+from server.services.interview_brain_service import (
+    resolve_interview_session,
+    generate_interview_stream,
+    generate_interview_non_stream,
+)
 
 router = APIRouter(prefix="/api/avatar", tags=["avatar"])
 
@@ -206,19 +211,17 @@ async def brain_proxy_chat_completions(
     session: Session = Depends(get_session),
     authorization: Optional[str] = Header(None),
 ):
-    """SDK LLM 请求代理：校验 token → RAG 检索 → LLM 调用 → 返回标准 OpenAI SSE。"""
+    """SDK LLM 请求代理：校验 token → RAG 检索 → LLM 调用 → 返回标准 OpenAI SSE。
+
+    按 token 归属分流：
+    1. 面试 token（InterviewAvatarSession）→ 面试官大脑（interview_brain_service）
+    2. 聊天 token（AvatarSessionToken）→ 聊天链路（avatar_brain_service）
+    """
     # 1. 校验 token
     if not authorization or not authorization.startswith("Bearer "):
         print(f"[Brain Proxy] WARN: Missing/invalid Authorization header. headers={dict(request.headers)}")
         raise HTTPException(401, "Missing authorization")
     token_str = authorization.split(" ", 1)[1]
-
-    resolved = resolve_session(session, token_str)
-    if resolved is None:
-        print(f"[Brain Proxy] WARN: Session token not found or expired. token={token_str[:16]}...")
-        raise HTTPException(401, "Invalid or expired session token")
-    user, conv = resolved
-    print(f"[Brain Proxy] Auth OK: user={user.id}, conv={conv.id}")
 
     # 2. 解析请求体
     try:
@@ -237,15 +240,37 @@ async def brain_proxy_chat_completions(
     if not user_message:
         raise HTTPException(400, "No user message found in messages")
 
-    # 4. 流式或非流式
+    sse_headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    }
+
+    # 4a. 面试链路
+    interview_resolved = resolve_interview_session(session, token_str)
+    if interview_resolved is not None:
+        user, interview = interview_resolved
+        print(f"[Brain Proxy] Auth OK (interview): user={user.id}, interview={interview.id}")
+        if is_stream:
+            return StreamingResponse(
+                generate_interview_stream(user_message, interview.id),
+                media_type="text/event-stream",
+                headers=sse_headers,
+            )
+        return await generate_interview_non_stream(user_message, interview.id)
+
+    # 4b. 聊天链路
+    resolved = resolve_session(session, token_str)
+    if resolved is None:
+        print(f"[Brain Proxy] WARN: Session token not found or expired. token={token_str[:16]}...")
+        raise HTTPException(401, "Invalid or expired session token")
+    user, conv = resolved
+    print(f"[Brain Proxy] Auth OK (chat): user={user.id}, conv={conv.id}")
+
     if is_stream:
         return StreamingResponse(
             generate_stream(session, conv.id, user_message),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
+            headers=sse_headers,
         )
     else:
         result = await generate_non_stream(session, conv.id, user_message)

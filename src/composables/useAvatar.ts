@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { AvatarProvider } from '@/providers/avatarProvider'
+import type { AvatarProvider, AvatarInitOptions } from '@/providers/avatarProvider'
 import { DigitalAvatarProvider } from '@/providers/digitalAvatarProvider'
 import { LottieAvatarProvider } from '@/providers/lottieAvatarProvider'
 import { WebSpeechTtsProvider } from '@/providers/webSpeechTtsProvider'
@@ -26,8 +26,25 @@ function supportsWebCodecs(): boolean {
   return typeof window !== 'undefined' && 'VideoDecoder' in window
 }
 
+export interface InitAvatarOptions extends AvatarInitOptions {
+  /** 聊天场景：绑定到已有会话（不传则新建） */
+  conversationId?: number
+  /**
+   * 面试场景：由面试链路签发的 brain_config。
+   * 传入时直接使用，不再请求 /avatar/brain-config（避免落到聊天链路的学习导师）。
+   */
+  brainConfig?: BrainConfig
+}
+
 export function useAvatar() {
-  async function initAvatar(containerId: string, conversationId?: number): Promise<AvatarProvider> {
+  async function initAvatar(
+    containerId: string,
+    options: number | InitAvatarOptions = {},
+  ): Promise<AvatarProvider> {
+    // 兼容旧签名 initAvatar(containerId, conversationId?: number)
+    const opts: InitAvatarOptions =
+      typeof options === 'number' ? { conversationId: options } : options
+
     const host = detectHost()
     const { isMobile } = useDevice()
 
@@ -43,15 +60,19 @@ export function useAvatar() {
 
     if (webglOk && (isMobile.value || webCodecsOk)) {
       try {
-        let brainConfig: BrainConfig | undefined
-        try {
-          brainConfig = await getBrainConfig(conversationId)
-          lastBrainConfig.value = brainConfig ?? null
-        } catch {
-          console.warn('[Avatar] Failed to fetch brain-config, SDK will use default behavior')
+        let brainConfig: BrainConfig | undefined = opts.brainConfig
+        if (brainConfig) {
+          lastBrainConfig.value = brainConfig
+        } else {
+          try {
+            brainConfig = await getBrainConfig(opts.conversationId)
+            lastBrainConfig.value = brainConfig ?? null
+          } catch {
+            console.warn('[Avatar] Failed to fetch brain-config, SDK will use default behavior')
+          }
         }
         const provider = new DigitalAvatarProvider()
-        await provider.init(containerId, brainConfig)
+        await provider.init(containerId, brainConfig, opts)
         avatarProvider.value = provider
         isDigital.value = true
         return provider

@@ -3,6 +3,7 @@ import type {
   InterviewConfig,
   AIResponse,
   InterviewRecord,
+  BrainConfig,
 } from '@/types'
 
 export function startInterview(
@@ -16,6 +17,16 @@ export function submitAnswer(
   answer: string,
 ): Promise<AIResponse> {
   return client.post(`/interview/${interviewId}/answer`, { answer })
+}
+
+/**
+ * 签发面试专用 brain_config，让数字人 SDK 的 LLM 请求命中「面试官大脑」
+ * 而不是聊天链路的「学习导师」。
+ */
+export function createInterviewAvatarSession(
+  interviewId: number,
+): Promise<BrainConfig> {
+  return client.post(`/interview/${interviewId}/avatar-session`)
 }
 
 export function endInterview(interviewId: number): Promise<void> {

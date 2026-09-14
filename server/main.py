@@ -29,6 +29,11 @@ from server.services.avatar_brain_service import (
     generate_non_stream,
     _extract_last_user_message,
 )
+from server.services.interview_brain_service import (
+    resolve_interview_session,
+    generate_interview_stream,
+    generate_interview_non_stream,
+)
 
 app = FastAPI(title="AI Interviewer API", version="0.1.0")
 
@@ -69,9 +74,10 @@ async def root_v1_chat_completions(
 ):
     """根级 /v1/chat/completions — 供 E2EMPServer BrainClient (localhost:8000) 调用.
 
-    两种模式：
-    1. Avatar 代理模式：Bearer token 为 avatar session token → RAG+LLM
-    2. 直连模式：Bearer token 为 LLM API key + X-Api-Base → 直接转发 LLM
+    三种模式：
+    1. 面试代理模式：Bearer token 为 interview avatar session token → 面试官大脑
+    2. 聊天代理模式：Bearer token 为 avatar session token → RAG+LLM（学习导师）
+    3. 直连模式：Bearer token 为 LLM API key + X-Api-Base → 直接转发 LLM
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "Missing or invalid Authorization header")
@@ -89,9 +95,30 @@ async def root_v1_chat_completions(
     is_stream = body.get("stream", True)
     user_message = _extract_last_user_message(messages)
 
-    # 尝试作为 avatar session token 解析
+    # 尝试作为面试 token 解析（优先），再尝试聊天 token
     with Session(engine) as db:
-        resolved = resolve_session(db, token_str)
+        interview_resolved = resolve_interview_session(db, token_str)
+        resolved = None if interview_resolved is not None else resolve_session(db, token_str)
+
+    if interview_resolved is not None:
+        # ── 面试代理模式：面试官大脑 ──
+        user, interview = interview_resolved
+        print(f"[Root V1] Interview proxy mode, interview_id={interview.id}, user={user.id}")
+
+        if not user_message:
+            raise HTTPException(400, "No user message found in messages")
+
+        sse_headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+        if is_stream:
+            return StreamingResponse(
+                generate_interview_stream(user_message, interview.id),
+                media_type="text/event-stream",
+                headers=sse_headers,
+            )
+        return await generate_interview_non_stream(user_message, interview.id)
 
     if resolved is not None:
         # ── Avatar 代理模式：RAG+LLM ──

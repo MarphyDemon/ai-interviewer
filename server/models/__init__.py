@@ -289,3 +289,17 @@ class AvatarSessionToken(SQLModel, table=True):
     conversation_id: int = Field(foreign_key="chatconversation.id")
     expires_at: datetime
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class InterviewAvatarSession(SQLModel, table=True):
+    """面试专用数字人会话 Token。
+
+    与 AvatarSessionToken（聊天场景）并列：brain proxy 解析 token 时先查本表，
+    命中则走「面试官大脑」（interview_brain_service），否则回落聊天链路。
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    interview_id: int = Field(foreign_key="interview.id", index=True)
+    token: str = Field(unique=True, index=True)
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -1,5 +1,5 @@
 import XingyunAvatarAgent from '@xmov/avatar/agent'
-import type { AvatarProvider } from './avatarProvider'
+import type { AvatarProvider, AvatarInitOptions } from './avatarProvider'
 import type { AgentLLMResponse, ASRResult, BrainConfig } from '@/types'
 import { getAvatarConfig } from '@/api/avatar'
 import type { AvatarConfig } from '@/types'
@@ -16,7 +16,11 @@ export class DigitalAvatarProvider implements AvatarProvider {
   private config: AvatarConfig | null = null
   private brainConfig: BrainConfig | null = null
 
-  async init(containerId: string, brainConfig?: BrainConfig): Promise<void> {
+  async init(
+    containerId: string,
+    brainConfig?: BrainConfig,
+    options?: AvatarInitOptions,
+  ): Promise<void> {
     this.config = await getAvatarConfig()
     this.brainConfig = brainConfig ?? null
 
@@ -29,6 +33,9 @@ export class DigitalAvatarProvider implements AvatarProvider {
       containerId,
       container,
       appId: this.config.appId,
+      ...(options?.sessionSpeakReqId !== undefined
+        ? { session_speak_req_id: options.sessionSpeakReqId }
+        : {}),
       "features": {
         "anti_interference": {
           "semantic_judge_enabled": false

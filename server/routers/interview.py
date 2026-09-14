@@ -13,7 +13,10 @@ from server.services.interview_service import (
     format_problem_for_interview,
 )
 from server.services.auth_service import get_current_user
+from server.services.common import get_active_llm_config
 from server.services.judge_service import judge
+from server.services.interview_brain_service import create_interview_session
+from server.config import settings
 from server.models import JobDescription
 
 router = APIRouter(prefix="/api/interview", tags=["interview"])
@@ -78,6 +81,62 @@ async def start_interview(
             response["firstQuestion"]["problem"] = format_problem_for_interview(problem)
 
     return response
+
+
+@router.post("/{interview_id}/avatar-session")
+async def create_avatar_session(
+    interview_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """为数字人 SDK 签发面试专用 brain_config。
+
+    返回的 api_key 是**面试会话 token**：SDK 携带它请求 brain proxy 时会命中
+    interview_brain_service（面试官大脑），而不是聊天链路（学习导师）。
+
+    - 代理模式（avatar_proxy_base_url 已配置）：返回代理 URL + 面试 token
+    - 直连模式（未配置）：返回真实 LLM 配置，便于本地开发
+    """
+    interview = session.get(Interview, interview_id)
+    if not interview or interview.user_id != user.id:
+        raise HTTPException(404, "面试不存在")
+
+    cfg = get_active_llm_config(session)
+
+    if settings.avatar_proxy_base_url:
+        try:
+            token_str = create_interview_session(session, user.id, interview_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+
+        proxy_base = settings.avatar_proxy_base_url.rstrip("/") + "/api/avatar/brain-proxy/v1"
+        return {
+            "provider": "openai",
+            "model": cfg.model,
+            "api_key": token_str,
+            "base_url": proxy_base,
+            "extra_body": {"temperature": 0.7},
+        }
+
+    # 直连模式：本地开发友好
+    provider = "deepseek"
+    base_url = cfg.base_url
+    if "volces" in base_url or "ark" in base_url:
+        provider = "volces"
+    elif "siliconflow" in base_url:
+        provider = "siliconflow"
+    elif "openrouter" in base_url:
+        provider = "openrouter"
+    elif "together" in base_url:
+        provider = "together"
+
+    return {
+        "provider": provider,
+        "model": cfg.model,
+        "api_key": cfg.api_key,
+        "base_url": cfg.base_url,
+        "extra_body": {"temperature": 0.7},
+    }
 
 
 @router.post("/{interview_id}/answer")

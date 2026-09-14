@@ -1,7 +1,19 @@
 import type { AgentLLMResponse, ASRResult, BrainConfig } from '@/types'
 
+/** 数字人初始化可选项 */
+export interface AvatarInitOptions {
+  /**
+   * Agent 会话播报序号起始值：
+   * - 1（默认）：会话开始即触发一轮播报（SDK 生成开场白）
+   * - 0：无开场白，等业务侧显式播报
+   *
+   * 面试场景传 0 —— 开场白由面试编排给出，避免与 SDK 自动开场重复。
+   */
+  sessionSpeakReqId?: 0 | 1
+}
+
 export interface AvatarProvider {
-  init(containerId: string, brainConfig?: BrainConfig): Promise<void>
+  init(containerId: string, brainConfig?: BrainConfig, options?: AvatarInitOptions): Promise<void>
   speak(text: string): Promise<void>
   /** 流式追加播报：收到增量文本即送播，不中断当前播报（边生成边讲） */
   speakChunk?(text: string): void
