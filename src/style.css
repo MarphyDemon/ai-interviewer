@@ -34,7 +34,7 @@ body,
   }
 }
 
-/* 数字人舞台 9:16 竖版比例 */
+/* 具身交互智能体舞台 9:16 竖版比例 */
 .avatar-stage {
   aspect-ratio: 9 / 16;
   max-height: 100%;
@@ -60,7 +60,7 @@ body,
   pointer-events: none;
 }
 
-/* 数字人自定义全屏样式 */
+/* 具身交互智能体自定义全屏样式 */
 .avatar-stage.is-fullscreen {
   position: fixed;
   inset: 0;

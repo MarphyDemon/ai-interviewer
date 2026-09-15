@@ -40,7 +40,7 @@ async function handleShare() {
   const url = window.location.origin
   await shareContent({
     title: 'AI 面试官',
-    text: '快来和 AI 数字人面试官一起练习面试！',
+    text: '快来和具身交互智能体面试官一起练习面试！',
     url,
   })
 }

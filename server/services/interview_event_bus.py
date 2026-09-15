@@ -1,7 +1,7 @@
 """面试事件总线：把 brain 流水线中的结构化事件旁路推送给前端。
 
 设计背景：
-数字人 SDK 的 BrainClient 只消费 SSE 的 `delta.content`，结构化事件（工具调用、
+具身交互智能体 SDK 的 BrainClient 只消费 SSE 的 `delta.content`，结构化事件（工具调用、
 Widget 载荷、情绪决策、时延埋点）不能塞进正文字段，否则会污染播报文本。
 因此用一条独立的 SSE 通道（GET /api/interview/{id}/events）旁路推送。
 

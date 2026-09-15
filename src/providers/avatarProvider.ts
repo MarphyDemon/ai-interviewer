@@ -1,6 +1,6 @@
 import type { AgentLLMResponse, ASRResult, BrainConfig, RawWidgetEvent } from '@/types'
 
-/** 数字人初始化可选项 */
+/** 具身交互智能体初始化可选项 */
 export interface AvatarInitOptions {
   /**
    * Agent 会话播报序号起始值：
@@ -37,7 +37,7 @@ export interface AvatarProvider {
   isReady(): boolean
   /** 容器尺寸/位置变化时调用，通知底层 SDK 重新适配画布（无需销毁重建） */
   resize?(): void
-  /** 设置数字人字幕显示回调：on 为 true 显示字幕，false 隐藏 */
+  /** 设置具身交互智能体字幕显示回调：on 为 true 显示字幕，false 隐藏 */
   setOnSubtitle?(callback: (text: string | null, on: boolean) => void): void
   /**
    * 设置 SDK 原生 Widget 事件回调（`show_*` / `widget_*`）。

@@ -276,7 +276,7 @@ async function stopVoice() {
   const finalText = asrResults.value.trim()
   if (finalText) {
     if (isDigital.value) {
-      // 数字人模式：语音已由 SDK 直接送入「面试官大脑」，回复会自动播报，
+      // 具身交互智能体模式：语音已由 SDK 直接送入「面试官大脑」，回复会自动播报，
       // 这里只把识别文本落到本地聊天记录，避免重复生成与重复播报。
       store.addMessage('user', finalText)
       await nextTick()
@@ -366,7 +366,7 @@ function scrollToBottom() {
               :title="eventsConnected ? '事件流已连接' : '事件流未连接'"
             />
           </span>
-          <span v-if="metrics" title="首字延迟：用户说完 → 数字人开口">
+          <span v-if="metrics" title="首字延迟：用户说完 → 具身交互智能体开口">
             首字 <span class="font-mono text-gray-700">{{ metrics.ttfaMs ?? '-' }}</span>ms
           </span>
           <span v-if="metrics" title="本轮工具调用累计耗时">
@@ -410,7 +410,7 @@ function scrollToBottom() {
           </div>
         </div>
 
-        <!-- 工具调用结果 Widget：锚定在数字人舞台下沿 -->
+        <!-- 工具调用结果 Widget：锚定在具身交互智能体舞台下沿 -->
         <WidgetHost />
       </div>
 

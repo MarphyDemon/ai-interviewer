@@ -98,7 +98,7 @@ async def create_avatar_session(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """为数字人 SDK 签发面试专用 brain_config。
+    """为具身交互智能体 SDK 签发面试专用 brain_config。
 
     返回的 api_key 是**面试会话 token**：SDK 携带它请求 brain proxy 时会命中
     interview_brain_service（面试官大脑），而不是聊天链路（学习导师）。
@@ -157,7 +157,7 @@ async def interview_events(
     """面试事件流（SSE 旁路）。
 
     推送 brain 流水线中的结构化事件：tool_start / tool_result / widget / emotion / metrics。
-    这些事件**不能**混进 brain 代理的 SSE 正文字段，否则会被数字人当成播报文本念出来，
+    这些事件**不能**混进 brain 代理的 SSE 正文字段，否则会被具身交互智能体当成播报文本念出来，
     因此单独开一条通道。
 
     浏览器 EventSource 不支持自定义请求头，故 token 走查询参数。

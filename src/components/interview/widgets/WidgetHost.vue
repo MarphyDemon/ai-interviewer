@@ -13,7 +13,7 @@ import ScoreWidget from './ScoreWidget.vue'
  * Widget 宿主：按类型分发到具体组件，负责堆叠、关闭与动效。
  *
  * 布局策略（参考官方 CustomWidgetOverlay 每类卡片占固定区域的思路）：
- * 桌面端固定在数字人舞台右侧，移动端沉到底部，避免遮挡数字人正脸与输入区。
+ * 桌面端固定在具身交互智能体舞台右侧，移动端沉到底部，避免遮挡具身交互智能体正脸与输入区。
  */
 
 const { widgets, removeWidget } = useInterviewEvents()
@@ -61,9 +61,9 @@ const visible = computed(() => widgets.value.filter((w) => w.type in registry))
 
 <style scoped>
 /*
- * 锚定在数字人舞台底部（下三分之一），形成"下沿图文"的呈现效果：
+ * 锚定在具身交互智能体舞台底部（下三分之一），形成"下沿图文"的呈现效果：
  * - 不遮挡右侧对话区（桌面端右栏是用户气泡所在）
- * - 不遮挡数字人面部（角色通常居中偏上）
+ * - 不遮挡具身交互智能体面部（角色通常居中偏上）
  * 容器本身不接收事件，只有卡片可交互，避免挡住底层画布操作。
  */
 .widget-host {

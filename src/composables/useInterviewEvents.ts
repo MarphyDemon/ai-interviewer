@@ -10,7 +10,7 @@ import { getApiBaseURL, getToken } from '@/api/client'
 /**
  * 面试事件流（SSE 旁路）订阅 + Widget 栈管理。
  *
- * 为什么需要旁路：brain 代理的 SSE 正文字段会被数字人直接朗读，
+ * 为什么需要旁路：brain 代理的 SSE 正文字段会被具身交互智能体直接朗读，
  * 工具调用/Widget/情绪/时延这些结构化信息不能混进去，因此单独开一条通道。
  *
  * 状态放在模块级（单例），与 useAvatar 的写法保持一致。

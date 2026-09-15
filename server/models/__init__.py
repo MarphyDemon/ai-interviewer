@@ -128,19 +128,19 @@ class ChatMessage(SQLModel, table=True):
 
 
 class AvatarProviderConfig(SQLModel, table=True):
-    """数字人服务凭证（ASR/TTS/形象捆绑，镜像 LLMConfig 模式）"""
+    """具身交互智能体服务凭证（ASR/TTS/形象捆绑，镜像 LLMConfig 模式）"""
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     app_id: str
     app_secret: str  # Fernet 加密存储
     gateway_server: str
-    avatar_image: str = ""  # 数字人形象图片 URL
+    avatar_image: str = ""  # 具身交互智能体形象图片 URL
     is_active: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class Avatar(SQLModel, table=True):
-    """数字人形象目录（用户级选择，资源后补）"""
+    """具身交互智能体形象目录（用户级选择，资源后补）"""
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     cover_url: str = ""
@@ -282,7 +282,7 @@ class InviteCode(SQLModel, table=True):
 
 
 class AvatarSessionToken(SQLModel, table=True):
-    """数字人 SDK 会话 Token：长时效（24h），用作 brain_config.api_key 代理 RAG+LLM 请求。"""
+    """具身交互智能体 SDK 会话 Token：长时效（24h），用作 brain_config.api_key 代理 RAG+LLM 请求。"""
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     token: str = Field(unique=True, index=True)
@@ -292,7 +292,7 @@ class AvatarSessionToken(SQLModel, table=True):
 
 
 class InterviewAvatarSession(SQLModel, table=True):
-    """面试专用数字人会话 Token。
+    """面试专用具身交互智能体会话 Token。
 
     与 AvatarSessionToken（聊天场景）并列：brain proxy 解析 token 时先查本表，
     命中则走「面试官大脑」（interview_brain_service），否则回落聊天链路。

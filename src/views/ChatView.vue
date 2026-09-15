@@ -20,7 +20,7 @@ const showAvatar = ref(false)
 const editingId = ref<number | null>(null)
 const editingTitle = ref('')
 
-// 数字人状态
+// 具身交互智能体状态
 const avatarLoading = ref(false)
 const avatarFailed = ref(false)
 const autoSpeak = ref(true)
@@ -119,7 +119,7 @@ watch(() => store.streaming, async (streaming) => {
   }
 })
 
-// 切换会话时销毁数字人（避免消息写错会话）
+// 切换会话时销毁具身交互智能体（避免消息写错会话）
 watch(() => store.currentId, async (newId, oldId) => {
   if (showAvatar.value && newId !== oldId && oldId !== null) {
     stopSpeaking()
@@ -221,7 +221,7 @@ async function handleSend() {
   scrollToBottom()
 }
 
-/** 中断当前回答生成（同时停止数字人播报），保留已生成内容 */
+/** 中断当前回答生成（同时停止具身交互智能体播报），保留已生成内容 */
 function handleStop() {
   streamAborted.value = true
   speakBuffer.value = ''
@@ -229,7 +229,7 @@ function handleStop() {
   stopSpeaking()
 }
 
-/** 切换数字人显示/隐藏 */
+/** 切换具身交互智能体显示/隐藏 */
 async function toggleAvatar() {
   if (showAvatar.value) {
     stopSpeaking()
@@ -293,7 +293,7 @@ async function toggleAvatar() {
   }
 }
 
-/** 处理数字人 LLM 响应（SDK 回调 → 前端实时展示） */
+/** 处理具身交互智能体 LLM 响应（SDK 回调 → 前端实时展示） */
 function handleAvatarLLMResponse(response: AgentLLMResponse) {
   if (response.event === 'chunk' && response.text) {
     // 流式追加：创建或追加到 assistant 消息
@@ -358,7 +358,7 @@ function toggleMic() {
   provider.startASR((result) => {
     if (result.isFinal && result.text) {
       if (showAvatar.value && avatarConversationId.value) {
-        // 数字人激活时：用户语音消息直接显示（SDK brain_config 会处理 LLM）
+        // 具身交互智能体激活时：用户语音消息直接显示（SDK brain_config 会处理 LLM）
         store.currentMessages.push({
           id: Date.now(),
           role: 'user',
@@ -403,7 +403,7 @@ async function startFullscreenASR() {
           fullscreenPartialText.value = msg
           if (!msg) return
           if (showAvatar.value && avatarConversationId.value) {
-            // 数字人激活时：用户语音消息直接显示（SDK brain_config 处理 LLM）
+            // 具身交互智能体激活时：用户语音消息直接显示（SDK brain_config 处理 LLM）
             store.currentMessages.push({
               id: Date.now(),
               role: 'user',
@@ -473,14 +473,14 @@ function toggleFullscreenListening() {
   }
 }
 
-/** 进入数字人全屏 - 数字人展示，ASR 等待用户点击麦克风启动 */
+/** 进入具身交互智能体全屏 - 具身交互智能体展示，ASR 等待用户点击麦克风启动 */
 function enterFullscreen() {
   isFullscreen.value = true
   fullscreenPartialText.value = ''
   cancelAsrAutoClear()
 }
 
-/** 退出数字人全屏 */
+/** 退出具身交互智能体全屏 */
 async function exitFullscreen() {
   isFullscreen.value = false
   cancelAsrAutoClear()
@@ -750,7 +750,7 @@ async function handleDelete(id: number) {
       </div>
     </main>
 
-    <!-- 浮动数字人容器：单一 DOM，通过 CSS 切换位置/大小 -->
+    <!-- 浮动具身交互智能体容器：单一 DOM，通过 CSS 切换位置/大小 -->
     <div
       v-if="showAvatar"
       :class="[
@@ -758,7 +758,7 @@ async function handleDelete(id: number) {
         isNarrow || isFullscreen ? 'avatar-float--full' : 'avatar-float--side',
       ]"
     >
-      <!-- 数字人舞台：侧栏模式自适应，全屏模式使用 flex: 1 -->
+      <!-- 具身交互智能体舞台：侧栏模式自适应，全屏模式使用 flex: 1 -->
       <div
         ref="avatarStageEl"
         class="avatar-stage relative overflow-hidden"
@@ -778,7 +778,7 @@ async function handleDelete(id: number) {
         </div>
       </div>
 
-      <!-- SDK 字幕代理渲染：移至 avatar-float 层级，避免被数字人 canvas 遮挡 -->
+      <!-- SDK 字幕代理渲染：移至 avatar-float 层级，避免被具身交互智能体 canvas 遮挡 -->
       <transition name="fade-up">
         <div
           v-if="sdkSubtitleVisible && sdkSubtitleText && (isNarrow || isFullscreen)"
@@ -809,7 +809,7 @@ async function handleDelete(id: number) {
             <button
               type="button"
               class="rounded-full bg-primary-50 px-2 py-1 text-xs font-medium text-primary-600 transition hover:bg-primary-100"
-              title="全屏数字人"
+              title="全屏具身交互智能体"
               @click="enterFullscreen"
             >
               ⤢ 全屏
@@ -828,7 +828,7 @@ async function handleDelete(id: number) {
             class="flex h-10 items-center gap-2 rounded-full bg-gray-100 px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-200"
           >
             <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="isFullscreen ? 'M6 18L18 6M6 6l12 12' : 'M19 9l-7 7-7-7'"/></svg>
-            {{ isFullscreen ? '退出全屏' : '关闭数字人' }}
+            {{ isFullscreen ? '退出全屏' : '关闭具身交互智能体' }}
           </button>
           <span class="text-sm font-medium text-gray-700">{{ t('chat.avatarPanel') }}</span>
           <div class="flex items-center gap-2">
@@ -900,7 +900,7 @@ async function handleDelete(id: number) {
 </template>
 
 <style scoped>
-/* 浮动数字人容器 - 侧栏模式（宽屏） */
+/* 浮动具身交互智能体容器 - 侧栏模式（宽屏） */
 .avatar-float--side {
   position: relative;
   width: 320px;
@@ -922,7 +922,7 @@ async function handleDelete(id: number) {
   aspect-ratio: 9/16;
 }
 
-/* 浮动数字人容器 - 全屏/窄屏模式 */
+/* 浮动具身交互智能体容器 - 全屏/窄屏模式 */
 .avatar-float--full {
   position: fixed;
   inset: 0;

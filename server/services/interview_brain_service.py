@@ -1,4 +1,4 @@
-"""面试官 Brain 服务：把数字人 SDK 的 LLM 请求代理为「面试官大脑」。
+"""面试官 Brain 服务：把具身交互智能体 SDK 的 LLM 请求代理为「面试官大脑」。
 
 与 avatar_brain_service（聊天/学习导师）并列，二者通过 token 归属分流：
 - AvatarSessionToken        → 聊天链路（RAG + 学习导师 prompt）
@@ -35,7 +35,7 @@ def create_interview_session(
     user_id: int,
     interview_id: int,
 ) -> str:
-    """为某场面试签发数字人会话 token。返回 token 字符串。
+    """为某场面试签发具身交互智能体会话 token。返回 token 字符串。
 
     同一场面试可签发多个 token（例如刷新页面后），旧 token 保留至过期。
     """

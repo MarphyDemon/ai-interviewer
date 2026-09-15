@@ -20,7 +20,7 @@ export function submitAnswer(
 }
 
 /**
- * 签发面试专用 brain_config，让数字人 SDK 的 LLM 请求命中「面试官大脑」
+ * 签发面试专用 brain_config，让具身交互智能体 SDK 的 LLM 请求命中「面试官大脑」
  * 而不是聊天链路的「学习导师」。
  */
 export function createInterviewAvatarSession(

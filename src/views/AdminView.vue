@@ -77,7 +77,7 @@ async function verify() {
           class="flex-shrink-0 flex-1 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition min-h-[40px]"
           :class="activeTab === 'avatar' ? 'bg-white text-primary-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'"
         >
-          👤 数字人
+          👤 具身交互智能体
         </button>
         <button
           @click="activeTab = 'users'"

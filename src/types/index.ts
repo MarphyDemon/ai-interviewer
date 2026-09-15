@@ -283,7 +283,7 @@ export interface JudgeCaseLite {
 }
 
 export interface InterviewMetrics {
-  /** 首字延迟：用户说完 → 数字人开口（毫秒） */
+  /** 首字延迟：用户说完 → 具身交互智能体开口（毫秒） */
   ttfaMs: number | null
   /** 本轮流式生成中工具调用的累计耗时 */
   toolMs: number
@@ -312,7 +312,7 @@ export type InterviewEvent =
   | ({ type: 'emotion' } & InterviewEmotionEvent)
   | ({ type: 'metrics' } & InterviewMetrics)
 
-/** 数字人 SDK 下发的原始 Widget 事件（proxyWidget 回调入参） */
+/** 具身交互智能体 SDK 下发的原始 Widget 事件（proxyWidget 回调入参） */
 export interface RawWidgetEvent {
   type: string
   data?: Record<string, any>

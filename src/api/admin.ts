@@ -37,7 +37,7 @@ export function deleteLLMConfig(id: number): Promise<void> {
   return client.delete(`/admin/llm-config/${id}`)
 }
 
-// ---------- 数字人服务凭证（AvatarProviderConfig）----------
+// ---------- 具身交互智能体服务凭证（AvatarProviderConfig）----------
 
 export interface AvatarProviderConfigItem {
   id: number

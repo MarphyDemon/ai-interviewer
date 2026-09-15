@@ -229,7 +229,7 @@ async def delete_config(
     return {"ok": True}
 
 
-# ---------- 数字人服务凭证 ----------
+# ---------- 具身交互智能体服务凭证 ----------
 
 @router.get("/avatar-config")
 async def list_avatar_configs(

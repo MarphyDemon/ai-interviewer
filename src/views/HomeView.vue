@@ -105,7 +105,7 @@ function go(path: string) {
       </div>
     </section>
 
-    <!-- 数字人形象选择（登录用户可见） -->
+    <!-- 具身交互智能体形象选择（登录用户可见） -->
     <section v-if="userStore.isLoggedIn" class="mx-auto max-w-5xl px-4 pb-16">
       <div class="mb-6 text-center">
         <h2 class="text-2xl font-bold text-gray-900 md:text-3xl">{{ t('home.avatarSectionTitle') }}</h2>

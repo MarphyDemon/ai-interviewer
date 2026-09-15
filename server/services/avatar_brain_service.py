@@ -1,4 +1,4 @@
-"""数字人 Brain Proxy 服务：将 SDK 的 LLM 请求代理为 RAG+LLM 流水线。
+"""具身交互智能体 Brain Proxy 服务：将 SDK 的 LLM 请求代理为 RAG+LLM 流水线。
 
 核心流程：
 1. 校验 session token → 获取用户身份与专属对话
@@ -38,7 +38,7 @@ def create_session_token(
 ) -> tuple[str, int]:
     """为用户创建 avatar 会话 token。返回 (token, conversation_id)。
 
-    如果传入 conversation_id，则绑定到已有会话；否则创建新的"数字人对话"。
+    如果传入 conversation_id，则绑定到已有会话；否则创建新的"具身交互智能体对话"。
     每次调用都会创建新的 token；旧 token 可保留至过期。
     """
     if conversation_id is not None:
@@ -48,7 +48,7 @@ def create_session_token(
     else:
         conv = ChatConversation(
             user_id=user_id,
-            title="数字人对话",
+            title="具身交互智能体对话",
         )
         session.add(conv)
         session.commit()
@@ -111,7 +111,7 @@ async def _retrieve_knowledge(query: str, top_k: int = 5) -> str:
 
 def _build_system_prompt(knowledge: str = "") -> str:
     base = (
-        "你是一名耐心的技术学习导师（数字人），帮助用户学习面试相关知识。"
+        "你是一名耐心的技术学习导师（具身交互智能体），帮助用户学习面试相关知识。"
         "用户会就单个知识点提问，你基于下方知识库内容回答；"
         "如果知识库内容与问题无关，则忽略它，用你自己的知识作答。"
         "回答要清晰、准确、有条理，必要时给出代码示例。用中文回答。"

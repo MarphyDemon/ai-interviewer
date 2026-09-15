@@ -85,7 +85,7 @@ def init_db():
 
 
 def _seed_avatars():
-    """不再预置 Avatar 表数据。数字人形象由 AvatarProviderConfig 管理。"""
+    """不再预置 Avatar 表数据。具身交互智能体形象由 AvatarProviderConfig 管理。"""
     pass
 
 

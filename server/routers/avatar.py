@@ -34,11 +34,11 @@ async def get_avatar_config(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """前端数字人 SDK 初始化配置。
+    """前端具身交互智能体 SDK 初始化配置。
 
-    优先使用用户选择的数字人配置，无则降级到 .env 默认配置。
+    优先使用用户选择的具身交互智能体配置，无则降级到 .env 默认配置。
     """
-    # 1. 尝试用户偏好的数字人配置
+    # 1. 尝试用户偏好的具身交互智能体配置
     if user.preferred_avatar_config_id:
         cfg = session.get(AvatarProviderConfig, user.preferred_avatar_config_id)
         if cfg:
@@ -65,18 +65,18 @@ async def get_homepage_avatars(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """获取首页展示的所有数字人形象。
+    """获取首页展示的所有具身交互智能体形象。
 
     包含：
     1. .env 默认形象（始终展示，无配置时的 fallback）
-    2. 管理后台启用的（is_active=True）数字人配置
+    2. 管理后台启用的（is_active=True）具身交互智能体配置
     """
     result = []
 
     # 1. .env 默认形象始终展示
     result.append({
         "id": None,
-        "name": "默认数字人",
+        "name": "默认具身交互智能体",
         "avatarImage": settings.avatar_default_image,
         "isDefault": True,
     })
@@ -114,7 +114,7 @@ async def set_avatar_preference(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """设置当前用户的偏好数字人形象。
+    """设置当前用户的偏好具身交互智能体形象。
 
     avatarConfigId 为 None 时表示使用 .env 默认配置。
     """
@@ -154,7 +154,7 @@ async def get_brain_config(
             raise HTTPException(404, str(e))
 
         conv = session.get(ChatConversation, conv_id)
-        conv_title = conv.title if conv else "数字人对话"
+        conv_title = conv.title if conv else "具身交互智能体对话"
         conv_created = conv.created_at.isoformat() if conv and conv.created_at else None
 
         proxy_base = settings.avatar_proxy_base_url.rstrip("/") + "/api/avatar/brain-proxy/v1"
