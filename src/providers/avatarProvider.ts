@@ -1,4 +1,4 @@
-import type { AgentLLMResponse, ASRResult, BrainConfig } from '@/types'
+import type { AgentLLMResponse, ASRResult, BrainConfig, RawWidgetEvent } from '@/types'
 
 /** 数字人初始化可选项 */
 export interface AvatarInitOptions {
@@ -27,12 +27,25 @@ export interface AvatarProvider {
   stopASR(): Promise<void>
   interrupt(): Promise<void>
   idle(): void
+  /** 进入「聆听」姿态（候选人说话时） */
+  listen?(): void
+  /** 进入「思考」姿态（LLM 生成 / 判题等空窗期，观感上表现为面试官在斟酌） */
+  think?(): void
+  /** 进入「交互待机」姿态（等待候选人操作，如写代码） */
+  interactiveIdle?(): void
   destroy(): Promise<void>
   isReady(): boolean
   /** 容器尺寸/位置变化时调用，通知底层 SDK 重新适配画布（无需销毁重建） */
   resize?(): void
   /** 设置数字人字幕显示回调：on 为 true 显示字幕，false 隐藏 */
   setOnSubtitle?(callback: (text: string | null, on: boolean) => void): void
+  /**
+   * 设置 SDK 原生 Widget 事件回调（`show_*` / `widget_*`）。
+   *
+   * 注意：SDK 内置只渲染了 `widget_pic` 与字幕，其余类型必须由业务侧接管，
+   * 否则会被静默丢弃。该回调同时用于探测实际下发的类型名（待验证项 Q7）。
+   */
+  setOnWidget?(callback: (widget: RawWidgetEvent) => void): void
   /** 设置 LLM 响应回调：SDK 收到 chunk/done 时触发 */
   setOnLLMResponse?(callback: (response: AgentLLMResponse) => void): void
 }

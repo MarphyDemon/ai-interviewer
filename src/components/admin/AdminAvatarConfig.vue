@@ -13,7 +13,7 @@ const editingAvatarId = ref<number | null>(null)
 const newAvatarName = ref('')
 const newAppId = ref('')
 const newAppSecret = ref('')
-const newGatewayServer = ref('https://test-nebula-agent.xmov.ai/user/v1/ttsa_v2/session')
+const newGatewayServer = ref('https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session')
 const newAvatarImage = ref('')
 const showAvatarSecret = ref(false)
 
@@ -72,7 +72,7 @@ function resetAvatarForm() {
   newAvatarName.value = ''
   newAppId.value = ''
   newAppSecret.value = ''
-  newGatewayServer.value = 'https://test-nebula-agent.xmov.ai/user/v1/ttsa_v2/session'
+  newGatewayServer.value = 'https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session'
   newAvatarImage.value = ''
   showAvatarSecret.value = false
 }

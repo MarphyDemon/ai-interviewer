@@ -249,6 +249,78 @@ export interface ASRResult {
   isFinal: boolean
 }
 
+// ===== 面试事件流（SSE 旁路）与 Widget =====
+
+/** Widget 类型：与后端 interview_tools.execute_tool 返回的 widget.type 一一对应 */
+export type InterviewWidgetType =
+  | 'resume_highlight'
+  | 'match_score'
+  | 'question_card'
+  | 'judge_result'
+  | 'interview_report'
+  | 'score'
+
+export interface InterviewWidget {
+  type: InterviewWidgetType
+  /** 同 type 下用于去重/更新的标识 */
+  id: string
+  data: Record<string, any>
+  /** 毫秒；省略表示常驻，需手动关闭 */
+  ttl?: number
+}
+
+export interface MatchBreakdownItemLite {
+  requirement: string
+  status: 'met' | 'partial' | 'gap'
+  evidence: string
+}
+
+export interface JudgeCaseLite {
+  passed: boolean
+  input: string
+  expected: string
+  actual: string
+}
+
+export interface InterviewMetrics {
+  /** 首字延迟：用户说完 → 数字人开口（毫秒） */
+  ttfaMs: number | null
+  /** 本轮流式生成中工具调用的累计耗时 */
+  toolMs: number
+  /** 本轮端到端耗时 */
+  totalMs: number
+}
+
+export interface InterviewToolEvent {
+  name: string
+  ok?: boolean
+  ms?: number
+  round?: number
+}
+
+export interface InterviewEmotionEvent {
+  emotion: string
+  ka: string
+  reason: string
+}
+
+/** 面试事件流推送的事件联合类型 */
+export type InterviewEvent =
+  | { type: 'widget'; payload: InterviewWidget }
+  | { type: 'tool_start'; name: string; round: number }
+  | ({ type: 'tool_result' } & InterviewToolEvent)
+  | ({ type: 'emotion' } & InterviewEmotionEvent)
+  | ({ type: 'metrics' } & InterviewMetrics)
+
+/** 数字人 SDK 下发的原始 Widget 事件（proxyWidget 回调入参） */
+export interface RawWidgetEvent {
+  type: string
+  data?: Record<string, any>
+  text?: string
+  speech_id?: number
+  client_speak_id?: string | number
+}
+
 export interface ChatConversation {
   id: number
   title: string

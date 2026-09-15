@@ -5,19 +5,22 @@ import { useI18n } from 'vue-i18n'
 import { VueMonacoEditor } from '@guolao/vue-monaco-editor'
 import { useInterviewStore } from '@/stores/interview'
 import { useAvatar } from '@/composables/useAvatar'
+import { useInterviewEvents } from '@/composables/useInterviewEvents'
 import { useDevice } from '@/composables/useDevice'
 import { useMediaRecorder } from '@/composables/useMediaRecorder'
 import { WebSpeechAsrProvider } from '@/providers/webSpeechAsrProvider'
+import WidgetHost from '@/components/interview/widgets/WidgetHost.vue'
 import { getLanguages, type LanguageItem } from '@/api/code'
 import { createInterviewAvatarSession } from '@/api/interview'
 import { renderMarkdown } from '@/utils/markdown'
-import type { ASRResult, BrainConfig } from '@/types'
+import type { ASRResult, BrainConfig, RawWidgetEvent } from '@/types'
 import type { AvatarProvider } from '@/providers/avatarProvider'
 
 const { t } = useI18n()
 const router = useRouter()
 const store = useInterviewStore()
 const { initAvatar, getProvider, destroyAvatar, isDigital } = useAvatar()
+const { metrics, activeTool, lastEmotion, connected: eventsConnected, connect: connectEvents, disconnect: disconnectEvents, clearWidgets } = useInterviewEvents()
 const { isMobile, isLandscape } = useDevice()
 
 const chatPanel = ref<HTMLElement | null>(null)
@@ -92,6 +95,8 @@ watch(() => store.currentProblem, (problem) => {
     const lang = codeLanguages.value.find((l) => l.id === codeLang.value)
     codeValue.value = lang?.template || ''
     codePanelCollapsed.value = false
+    // 等待候选人写代码 → 交互待机
+    getProvider()?.interactiveIdle?.()
   }
 })
 
@@ -103,6 +108,8 @@ function onCodeLangChange() {
 async function submitCode() {
   if (!store.currentProblem || !codeValue.value.trim()) return
   codeSubmitting.value = true
+  // 判题 + 生成下一题期间进入思考姿态
+  getProvider()?.think?.()
   try {
     await store.submitCode(store.currentProblem.id, codeLang.value, codeValue.value)
     await nextTick()
@@ -157,6 +164,11 @@ onMounted(async () => {
   await nextTick()
   console.log(document.getElementById(avatarContainerId))
 
+  // 订阅面试事件流（工具调用 / Widget / 情绪 / 时延）
+  if (store.interviewId) {
+    connectEvents(store.interviewId)
+  }
+
   try {
     // 签发面试专用 brain_config：让 SDK 的 LLM 请求命中「面试官大脑」而非聊天链路
     let brainConfig: BrainConfig | undefined
@@ -174,6 +186,10 @@ onMounted(async () => {
     })
     const provider = getProvider()
     if (provider) {
+      // 接管 SDK 原生 Widget 事件（SDK 内置只渲染图片与字幕，其余会被丢弃）
+      provider.setOnWidget?.((w: RawWidgetEvent) => {
+        console.debug('[Interview] SDK widget event:', w.type, w)
+      })
       await speakCurrentQuestion()
     }
   } catch (e: any) {
@@ -199,6 +215,8 @@ onMounted(async () => {
 onUnmounted(async () => {
   if (timer) clearInterval(timer)
   stopCamera()
+  disconnectEvents()
+  clearWidgets()
   await destroyAvatar()
 })
 
@@ -230,6 +248,8 @@ async function startVoice() {
         partialText.value = result.text
       }
     })
+    // 聆听姿态：候选人开口期间，面试官表现为在听
+    provider.listen?.()
   } else if (fallbackAsr.value && fallbackAsr.value.isAvailable()) {
     fallbackAsr.value.start((result: ASRResult) => {
       if (result.isFinal) {
@@ -278,6 +298,8 @@ async function submitText() {
 }
 
 async function submitAnswer(text: string) {
+  // 文字路径：等待后端编排期间进入思考姿态
+  getProvider()?.think?.()
   await store.submitAnswer(text)
   await nextTick()
   scrollToBottom()
@@ -300,6 +322,8 @@ async function handleEnd() {
   }
 
   await store.endInterview()
+  // 面试结束 → 回到待机姿态
+  getProvider()?.idle()
   if (store.interviewId) {
     router.push(`/report/${store.interviewId}`)
   }
@@ -330,6 +354,35 @@ function scrollToBottom() {
         <p class="text-xs text-gray-400 hidden md:block">{{ store.config?.style ? t('styles.' + store.config.style, store.config.style) : '' }}</p>
       </div>
       <div class="flex items-center gap-3 md:gap-4">
+        <!-- 具身链路实时指标：首字延迟 / 工具耗时 / 端到端 / 事件流状态 -->
+        <div
+          v-if="metrics || activeTool"
+          class="hidden items-center gap-3 rounded-lg bg-gray-50 px-3 py-1.5 text-[11px] text-gray-500 md:flex"
+        >
+          <span class="flex items-center gap-1">
+            <span
+              class="inline-block h-1.5 w-1.5 rounded-full"
+              :class="eventsConnected ? 'bg-green-500' : 'bg-gray-300'"
+              :title="eventsConnected ? '事件流已连接' : '事件流未连接'"
+            />
+          </span>
+          <span v-if="metrics" title="首字延迟：用户说完 → 数字人开口">
+            首字 <span class="font-mono text-gray-700">{{ metrics.ttfaMs ?? '-' }}</span>ms
+          </span>
+          <span v-if="metrics" title="本轮工具调用累计耗时">
+            工具 <span class="font-mono text-gray-700">{{ metrics.toolMs }}</span>ms
+          </span>
+          <span v-if="metrics" title="本轮端到端耗时">
+            总 <span class="font-mono text-gray-700">{{ metrics.totalMs }}</span>ms
+          </span>
+          <span v-if="activeTool" class="flex items-center gap-1 text-primary-600">
+            <span class="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-primary-500" />
+            {{ activeTool }}
+          </span>
+          <span v-if="lastEmotion?.emotion" class="text-gray-400" title="本轮情绪决策">
+            {{ lastEmotion.emotion }}
+          </span>
+        </div>
         <div class="text-base md:text-lg font-mono" :class="store.remainingTime < 60 ? 'text-red-500' : 'text-gray-600'">
           {{ remainingDisplay }}
         </div>
@@ -344,7 +397,7 @@ function scrollToBottom() {
     </div>
 
     <div class="flex flex-1 overflow-hidden flex-col md:flex-row" :class="{ 'md:flex-row': isMobile && isLandscape }">
-      <div class="flex h-40 md:h-full md:w-2/5 flex-shrink-0 flex-col items-center justify-center border-b md:border-b-0 md:border-r p-2" :class="{ 'md:w-1/3': isMobile && isLandscape }">
+      <div class="relative flex h-40 md:h-full md:w-2/5 flex-shrink-0 flex-col items-center justify-center border-b md:border-b-0 md:border-r p-2" :class="{ 'md:w-1/3': isMobile && isLandscape }">
         <div
           class="avatar-stage relative max-h-full w-full overflow-hidden rounded-2xl border border-primary-100/60 bg-gradient-brand-soft"
           :id="avatarContainerId"
@@ -356,6 +409,9 @@ function scrollToBottom() {
             </div>
           </div>
         </div>
+
+        <!-- 工具调用结果 Widget：锚定在数字人舞台下沿 -->
+        <WidgetHost />
       </div>
 
       <div class="flex flex-1 flex-col">

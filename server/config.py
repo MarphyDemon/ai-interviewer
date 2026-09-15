@@ -10,7 +10,7 @@ PROJECT_ROOT = BASE_DIR.parent
 class Settings(BaseSettings):
     avatar_app_id: str = ""
     avatar_app_secret: str = ""
-    avatar_gateway_server: str = "https://test-nebula-agent.xmov.ai/user/v1/ttsa_v2/session"
+    avatar_gateway_server: str = "https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session"
     avatar_default_image: str = "https://public-xmov.oss-cn-hangzhou.aliyuncs.com/avatar_sdk_material/M_CN03_show03__1080x1920__FS001__3DS16__T4__caixiangyu_15339_new.png"
     avatar_proxy_base_url: str = ""
 
@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-m3"
 
     admin_password: str = "admin123"
+
+    # 面试播报是否允许注入 SSML 标签（<ue4event> 关键动作 / <uievent> 控件）
+    # 依赖 Agent 模式下文本能原样透传到 TTSA（待验证项 Q4）。
+    # 未验证前保持 False：标签若不被解析，会被当成普通文本念出来。
+    interview_ssml_inject: bool = False
 
     # 数据库：默认 SQLite，设置 DATABASE_URL 环境变量可切换 PostgreSQL
     # e.g. postgresql://user:password@localhost:5432/ai_interviewer

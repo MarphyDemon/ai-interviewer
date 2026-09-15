@@ -24,6 +24,9 @@ from server.models import Interview, InterviewAvatarSession, InterviewMessage, U
 
 TOKEN_TTL_HOURS = 24
 
+# 单轮对话内允许的最大工具调用轮数（防止工具死循环）
+MAX_TOOL_ROUNDS = 3
+
 
 # ---------- Token 管理 ----------
 
@@ -117,6 +120,25 @@ def build_interviewer_prompt(
 - 禁止输出括号内的动作描述或旁白（如"（微笑）"）
 - 单次回复控制在 120 字以内，除非在讲解参考答案
 - 语言与候选人保持一致，中文面试用中文
+
+## 可用工具与调用规则（重要）
+你可以调用工具完成具体动作：读取岗位要求、查看简历、人岗匹配、检索题库、出题、
+判题、给回答打分、查询进度、生成报告，以及调整自己的表情与动作。
+
+**必须调用工具（不要用文字敷衍替代）的情形：**
+- 候选人明确要求做题、或提到"出题""练一道题" → 调用 `pick_algorithm_problem`
+- 面试进行到第 3 轮问答之后，尚未出过算法题 → 调用 `pick_algorithm_problem` 安排一道题
+- 候选人表示已提交代码、或要求评测代码 → 调用 `run_code`
+- 面试已到收尾阶段（时间不足或你已问完主要问题）→ 调用 `generate_report` 生成报告，再用一两句话告知结果
+- 候选人问"你看了我的简历吗"之类 → 调用 `analyze_resume`
+
+**可选调用：**
+- 对某段回答想给出量化评价时 → `score_answer`
+- 需要核对知识点时 → `retrieve_knowledge`
+- 表达对回答的态度时 → `set_emotion`（可附带 `ka` 动作）
+
+调用工具前不要预告细节，用一句话带过即可；工具返回后基于结果继续对话。
+**不要每轮都调用工具**，也不要为了展示能力而调用无关工具。
 """
     if jd_text:
         prompt += f"\n## 目标岗位 JD（据此针对性提问与追问）\n{jd_text}\n"
@@ -210,34 +232,77 @@ def _sse_chunk(chunk_id: str, created_ts: int, model: str, delta: dict, finish: 
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+# 工具名 → 过场语：本轮没有正文时先安抚一句，既掩盖工具耗时又触发 Think 姿态
+_TOOL_FILLER = {
+    "analyze_resume": "我先看一下你的简历。",
+    "get_job_description": "我看一下这个岗位的要求。",
+    "match_resume_to_jd": "我来对照一下岗位要求。",
+    "retrieve_knowledge": "我确认一下这个知识点。",
+    "pick_algorithm_problem": "我给你出一道题。",
+    "run_code": "我跑一下你的代码。",
+    "score_answer": "我评估一下刚才这段回答。",
+    "generate_report": "我来整理一下这场面试的报告。",
+    "get_interview_progress": "我看一下时间。",
+}
+_DEFAULT_FILLER = "稍等，我确认一下。"
+
+
+def _merge_tool_call_delta(acc: dict, deltas) -> None:
+    """合并流式 tool_calls 分片（OpenAI 流式下 name/arguments 是分片到达的）。"""
+    for d in deltas:
+        idx = getattr(d, "index", 0) or 0
+        slot = acc.setdefault(idx, {"id": "", "name": "", "arguments": ""})
+        if getattr(d, "id", None):
+            slot["id"] = d.id
+        fn = getattr(d, "function", None)
+        if fn is not None:
+            if getattr(fn, "name", None):
+                slot["name"] = fn.name
+            if getattr(fn, "arguments", None):
+                slot["arguments"] += fn.arguments
+
+
+def _ka_ssml(ka: str) -> str:
+    return (
+        "<ue4event><type>ka</type><data>"
+        f"<action_semantic>{ka}</action_semantic>"
+        "</data></ue4event>"
+    )
+
+
 async def generate_interview_stream(
     user_message: str,
     interview_id: int,
 ) -> AsyncGenerator[str, None]:
-    """面试官流式生成：RAG → LLM → 标准 OpenAI SSE。
+    """面试官流式生成：RAG → LLM（含工具循环）→ 标准 OpenAI SSE。
+
+    同时向事件总线广播结构化事件（tool_start / tool_result / widget / emotion / metrics），
+    供前端旁路渲染——这些内容不能混进 SSE 正文字段，否则会被当成播报文本念出来。
 
     使用独立 session 操作数据库，避免依赖注入的 session 在异步流期间被关闭。
     """
+    import time
     import uuid
     from datetime import datetime as dt
 
     from openai import AsyncOpenAI
 
+    from server.config import settings
     from server.database import engine
     from server.services.common import get_active_llm_config
+    from server.services.interview_event_bus import publish
     from server.services.interview_service import save_message
+    from server.services.interview_tools import TOOL_SCHEMAS, ToolContext, execute_tool
+
+    started_at = time.monotonic()
+    chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
+    created_ts = int(dt.utcnow().timestamp())
 
     with Session(engine) as db:
         interview = db.get(Interview, interview_id)
         if not interview:
             print(f"[Interview Brain] Interview {interview_id} not found")
-            yield _sse_chunk(
-                f"chatcmpl-{uuid.uuid4().hex}",
-                int(dt.utcnow().timestamp()),
-                "",
-                {"content": ""},
-                "stop",
-            )
+            yield _sse_chunk(chunk_id, created_ts, "", {"content": ""}, "stop")
             yield "data: [DONE]\n\n"
             return
 
@@ -247,28 +312,152 @@ async def generate_interview_stream(
         knowledge = await _retrieve_knowledge(db, interview.position, interview.difficulty)
         messages = _build_context(db, interview, knowledge)
         cfg = get_active_llm_config(db)
+        ctx = ToolContext(interview_id=interview_id, user_id=interview.user_id or 0)
 
     client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
 
     full_response = ""
-    chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
-    created_ts = int(dt.utcnow().timestamp())
+    pending_ka: list[str] = []          # 待注入文本的 KA 动作（SSML 开启时生效）
+    first_token_at: Optional[float] = None
+    tool_ms_total = 0
+
+    def emit(text: str) -> str:
+        """输出前处理：SSML 注入开关打开时，把待执行的 KA 动作前缀到文本。"""
+        nonlocal pending_ka
+        if not text:
+            return text
+        if pending_ka and settings.interview_ssml_inject:
+            prefix = "".join(_ka_ssml(k) for k in pending_ka)
+            pending_ka = []
+            return prefix + text
+        return text
 
     try:
-        async for chunk in await client.chat.completions.create(
-            model=cfg.model, messages=messages, stream=True
-        ):
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta.content or ""
-            if delta:
-                full_response += delta
-                yield _sse_chunk(chunk_id, created_ts, cfg.model, {"content": delta})
+        for round_idx in range(MAX_TOOL_ROUNDS + 1):
+            content_buf = ""
+            tool_calls: dict = {}
+
+            stream = await client.chat.completions.create(
+                model=cfg.model,
+                messages=messages,
+                tools=TOOL_SCHEMAS,
+                tool_choice="auto",
+                stream=True,
+            )
+
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                if delta.content:
+                    if first_token_at is None:
+                        first_token_at = time.monotonic()
+                    content_buf += delta.content
+                    full_response += delta.content
+                    yield _sse_chunk(chunk_id, created_ts, cfg.model, {"content": emit(delta.content)})
+
+                tool_deltas = getattr(delta, "tool_calls", None)
+                if tool_deltas:
+                    _merge_tool_call_delta(tool_calls, tool_deltas)
+
+            # 没有工具调用 → 本轮就是最终回答，结束
+            if not tool_calls:
+                break
+
+            # 超出最大轮数 → 停止工具循环，让 LLM 直接作答
+            if round_idx >= MAX_TOOL_ROUNDS:
+                print(f"[Interview Brain] max tool rounds reached, interview={interview_id}")
+                break
+
+            # 本轮没有正文 → 用按工具名选定的过场语顶上
+            if not content_buf.strip():
+                names = [tc["name"] for tc in tool_calls.values() if tc.get("name")]
+                filler = _TOOL_FILLER.get(names[0], _DEFAULT_FILLER) if names else _DEFAULT_FILLER
+                full_response += filler
+                yield _sse_chunk(chunk_id, created_ts, cfg.model, {"content": emit(filler)})
+
+            # 把 assistant 的 tool_calls 追加进对话
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": content_buf or None,
+                    "tool_calls": [
+                        {
+                            "id": tc["id"] or f"call_{idx}",
+                            "type": "function",
+                            "function": {"name": tc["name"], "arguments": tc["arguments"] or "{}"},
+                        }
+                        for idx, tc in sorted(tool_calls.items())
+                    ],
+                }
+            )
+
+            # 顺序执行工具
+            for idx, tc in sorted(tool_calls.items()):
+                name = tc.get("name") or ""
+                try:
+                    args = json.loads(tc["arguments"]) if tc.get("arguments") else {}
+                except json.JSONDecodeError:
+                    args = {}
+
+                publish(interview_id, {"type": "tool_start", "name": name, "round": round_idx})
+
+                t0 = time.monotonic()
+                result = await execute_tool(name, args, ctx)
+                cost_ms = int((time.monotonic() - t0) * 1000)
+                tool_ms_total += cost_ms
+
+                publish(
+                    interview_id,
+                    {
+                        "type": "tool_result",
+                        "name": name,
+                        "ok": bool(result.get("ok")),
+                        "ms": cost_ms,
+                    },
+                )
+
+                if result.get("widget"):
+                    publish(interview_id, {"type": "widget", "payload": result["widget"]})
+
+                data = result.get("data") or {}
+                if data.get("act") in ("emotion", "action"):
+                    if data.get("ka"):
+                        pending_ka.append(str(data["ka"]))
+                    publish(
+                        interview_id,
+                        {
+                            "type": "emotion",
+                            "emotion": data.get("emotion", ""),
+                            "ka": data.get("ka", ""),
+                            "reason": data.get("reason", ""),
+                        },
+                    )
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc["id"] or f"call_{idx}",
+                        "content": str(result.get("speak", ""))[:4000],
+                    }
+                )
     except Exception as e:
         print(f"[Interview Brain] Stream error: {e}")
     finally:
         yield _sse_chunk(chunk_id, created_ts, cfg.model, {}, "stop")
         yield "data: [DONE]\n\n"
+
+        # 时延埋点：首字延迟 / 工具总耗时 / 端到端耗时
+        publish(
+            interview_id,
+            {
+                "type": "metrics",
+                "ttfaMs": int((first_token_at - started_at) * 1000) if first_token_at else None,
+                "toolMs": tool_ms_total,
+                "totalMs": int((time.monotonic() - started_at) * 1000),
+            },
+        )
 
         # 落库面试官回复（供多轮记忆与报告生成使用）
         if full_response:
@@ -283,12 +472,17 @@ async def generate_interview_non_stream(
     user_message: str,
     interview_id: int,
 ) -> dict:
-    """面试官非流式生成（SDK 请求 stream=false 时使用）。"""
+    """面试官非流式生成（SDK 请求 stream=false 时使用）。
+
+    非流式路径同样启用工具，但不做流式工具循环——只执行一轮工具后给出最终回答。
+    """
     from openai import AsyncOpenAI
 
     from server.database import engine
     from server.services.common import get_active_llm_config
+    from server.services.interview_event_bus import publish
     from server.services.interview_service import save_message
+    from server.services.interview_tools import TOOL_SCHEMAS, ToolContext, execute_tool
 
     with Session(engine) as db:
         interview = db.get(Interview, interview_id)
@@ -301,12 +495,38 @@ async def generate_interview_non_stream(
         knowledge = await _retrieve_knowledge(db, interview.position, interview.difficulty)
         messages = _build_context(db, interview, knowledge)
         cfg = get_active_llm_config(db)
+        ctx = ToolContext(interview_id=interview_id, user_id=interview.user_id or 0)
 
     client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+
     response = await client.chat.completions.create(
-        model=cfg.model, messages=messages, stream=False
+        model=cfg.model, messages=messages, tools=TOOL_SCHEMAS, tool_choice="auto", stream=False
     )
-    full_response = response.choices[0].message.content or ""
+    choice = response.choices[0]
+    full_response = choice.message.content or ""
+
+    # 一轮工具执行（若有）
+    tool_calls = getattr(choice.message, "tool_calls", None)
+    if tool_calls:
+        messages.append(choice.message.model_dump())
+        for tc in tool_calls:
+            name = tc.function.name
+            try:
+                args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+            except json.JSONDecodeError:
+                args = {}
+            result = await execute_tool(name, args, ctx)
+            if result.get("widget"):
+                publish(interview_id, {"type": "widget", "payload": result["widget"]})
+            messages.append(
+                {"role": "tool", "tool_call_id": tc.id, "content": str(result.get("speak", ""))[:4000]}
+            )
+
+        follow_up = await client.chat.completions.create(
+            model=cfg.model, messages=messages, stream=False
+        )
+        full_response = follow_up.choices[0].message.content or full_response
+        response = follow_up
 
     if full_response:
         with Session(engine) as db:

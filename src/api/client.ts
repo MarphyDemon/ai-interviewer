@@ -1,7 +1,8 @@
 import axios from 'axios'
 import { detectHost } from '@/utils/bridge'
 
-function getApiBaseURL(): string {
+/** 后端 API 基址（已含 /api 后缀）。导出供 EventSource 等非 axios 场景复用。 */
+export function getApiBaseURL(): string {
   const host = detectHost()
   const envBase = import.meta.env.VITE_API_BASE_URL
   if (envBase) {
@@ -13,7 +14,8 @@ function getApiBaseURL(): string {
   return '/api'
 }
 
-async function getToken(url: string): Promise<string | null> {
+/** 读取登录 token。导出供 EventSource 等非 axios 场景复用。 */
+export async function getToken(url = ''): Promise<string | null> {
   const isAdminUrl = url.startsWith('/admin')
   const tokenKey = isAdminUrl ? 'admin_token' : 'user_token'
   const host = detectHost()

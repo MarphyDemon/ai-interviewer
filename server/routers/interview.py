@@ -1,9 +1,17 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlalchemy import delete as sa_delete
+from sqlmodel import Session, SQLModel, select
 from server.database import get_session
-from server.models import Interview, InterviewMessage, Report, Resume, User, AlgorithmProblem, CodeSubmission
+from server.models import (
+    Interview,
+    Resume,
+    User,
+    AlgorithmProblem,
+    CodeSubmission,
+)
 from server.services.interview_service import (
     generate_first_question,
     process_answer,
@@ -12,10 +20,11 @@ from server.services.interview_service import (
     pick_algorithm_problem,
     format_problem_for_interview,
 )
-from server.services.auth_service import get_current_user
+from server.services.auth_service import get_current_user, verify_user_token
 from server.services.common import get_active_llm_config
 from server.services.judge_service import judge
 from server.services.interview_brain_service import create_interview_session
+from server.services.interview_event_bus import publish, subscribe
 from server.config import settings
 from server.models import JobDescription
 
@@ -139,6 +148,53 @@ async def create_avatar_session(
     }
 
 
+@router.get("/{interview_id}/events")
+async def interview_events(
+    interview_id: int,
+    token: str = Query(..., description="用户登录 token（EventSource 无法自定义请求头）"),
+    session: Session = Depends(get_session),
+):
+    """面试事件流（SSE 旁路）。
+
+    推送 brain 流水线中的结构化事件：tool_start / tool_result / widget / emotion / metrics。
+    这些事件**不能**混进 brain 代理的 SSE 正文字段，否则会被数字人当成播报文本念出来，
+    因此单独开一条通道。
+
+    浏览器 EventSource 不支持自定义请求头，故 token 走查询参数。
+    """
+    user_id = verify_user_token(token)
+    if user_id is None:
+        raise HTTPException(401, "无效的登录凭证")
+
+    interview = session.get(Interview, interview_id)
+    if not interview or interview.user_id != user_id:
+        raise HTTPException(404, "面试不存在")
+
+    async def event_stream():
+        # 首帧注释：立即建立连接，避免被反向代理缓冲
+        yield ": connected\n\n"
+        sub = subscribe(interview_id)
+        try:
+            while True:
+                event = await sub.get(20)
+                if event is None:
+                    yield ": keep-alive\n\n"
+                    continue
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        finally:
+            sub.close()
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/{interview_id}/answer")
 async def submit_answer(
     interview_id: int,
@@ -172,7 +228,22 @@ async def submit_answer(
     if result.get("action") == "algorithm":
         problem = pick_algorithm_problem(session, interview.difficulty)
         if problem:
-            response["problem"] = format_problem_for_interview(problem)
+            formatted = format_problem_for_interview(problem)
+            response["problem"] = formatted
+            # 文字路径不走 brain 管线，这里主动补发 widget 事件，
+            # 让算法题卡片在两条路径下表现一致
+            publish(
+                interview_id,
+                {
+                    "type": "widget",
+                    "payload": {
+                        "type": "question_card",
+                        "id": f"problem-{problem.id}",
+                        "data": formatted,
+                        "ttl": 600000,
+                    },
+                },
+            )
 
     return response
 
@@ -273,7 +344,49 @@ async def submit_interview_code(
     if next_result.get("action") == "algorithm":
         next_problem = pick_algorithm_problem(session, interview.difficulty)
         if next_problem:
-            response["nextQuestion"]["problem"] = format_problem_for_interview(next_problem)
+            next_formatted = format_problem_for_interview(next_problem)
+            response["nextQuestion"]["problem"] = next_formatted
+            publish(
+                interview_id,
+                {
+                    "type": "widget",
+                    "payload": {
+                        "type": "question_card",
+                        "id": f"problem-{next_problem.id}",
+                        "data": next_formatted,
+                        "ttl": 600000,
+                    },
+                },
+            )
+
+    # 判题结果同样补发 widget 事件
+    publish(
+        interview_id,
+        {
+            "type": "widget",
+            "payload": {
+                "type": "judge_result",
+                "id": f"judge-{req.problemId}",
+                "data": {
+                    "title": problem.title,
+                    "status": result.status,
+                    "passCount": result.pass_count,
+                    "totalCount": result.total_count,
+                    "durationMs": result.duration_ms,
+                    "compileError": result.compile_error,
+                    "cases": [
+                        {
+                            "passed": c.passed,
+                            "input": c.input,
+                            "expected": c.expected,
+                            "actual": c.actual,
+                        }
+                        for c in result.cases
+                    ],
+                },
+            },
+        },
+    )
 
     session.commit()
     return response
@@ -317,6 +430,36 @@ def _format_interview(i: Interview) -> dict:
     }
 
 
+def _purge_interview_children(session: Session, interview_id: int) -> None:
+    """删除所有以 ForeignKey 直接指向 interview 的子表记录。
+
+    引用表通过 SQLModel.metadata **自动发现**，而不是维护硬编码清单：
+    今后新增任何直接引用 interview 的表都会被自动清理，不会再出现"加了表忘了改删除逻辑"。
+
+    背景：漏掉任何一张引用表，在 PostgreSQL 上都会抛 ForeignKeyViolation
+    （SQLite 默认不校验外键，本地测不出来），表现为「删除面试」接口 500。
+
+    局限：只处理直接子表。若将来出现引用子表的"孙表"，需要另按依赖深度处理。
+    """
+    root = Interview.__table__
+    for table in SQLModel.metadata.tables.values():
+        if table is root:
+            continue
+        fk_columns = [
+            col
+            for col in table.columns
+            for fk in col.foreign_keys
+            if fk.column.table is root
+        ]
+        if not fk_columns:
+            continue
+        session.execute(
+            sa_delete(table).where(*[col == interview_id for col in fk_columns])
+        )
+    # 子表已通过 Core DELETE 立即落库，这里再 flush 确保父表删除排在其后
+    session.flush()
+
+
 @router.delete("/{interview_id}")
 async def delete_interview(
     interview_id: int,
@@ -327,19 +470,7 @@ async def delete_interview(
     if not interview or interview.user_id != user.id:
         raise HTTPException(404, "Interview not found")
 
-    reports = session.exec(
-        select(Report).where(Report.interview_id == interview_id)
-    ).all()
-    for r in reports:
-        session.delete(r)
-
-    messages = session.exec(
-        select(InterviewMessage).where(InterviewMessage.interview_id == interview_id)
-    ).all()
-    for m in messages:
-        session.delete(m)
-
-    session.flush()
+    _purge_interview_children(session, interview_id)
     session.delete(interview)
     session.commit()
     return {"ok": True}
@@ -361,19 +492,7 @@ async def batch_delete_interviews(
         if not interview or interview.user_id != user.id:
             continue
 
-        reports = session.exec(
-            select(Report).where(Report.interview_id == interview_id)
-        ).all()
-        for r in reports:
-            session.delete(r)
-
-        messages = session.exec(
-            select(InterviewMessage).where(InterviewMessage.interview_id == interview_id)
-        ).all()
-        for m in messages:
-            session.delete(m)
-
-        session.flush()
+        _purge_interview_children(session, interview_id)
         session.delete(interview)
         deleted += 1
 

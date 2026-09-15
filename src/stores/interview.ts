@@ -21,6 +21,26 @@ export const useInterviewStore = defineStore('interview', () => {
   const currentProblem = ref<InterviewProblem | null>(null)
   const lastJudgeResult = ref<any>(null)
 
+  // 响应式时钟：remainingTime 依赖它才能真正随时间变化
+  // （直接读 Date.now() 不是响应式依赖，computed 永不重算，会导致倒计时静止）
+  const nowTick = ref(Date.now())
+  let ticker: ReturnType<typeof setInterval> | null = null
+
+  function startTicker() {
+    stopTicker()
+    nowTick.value = Date.now()
+    ticker = setInterval(() => {
+      nowTick.value = Date.now()
+    }, 1000)
+  }
+
+  function stopTicker() {
+    if (ticker) {
+      clearInterval(ticker)
+      ticker = null
+    }
+  }
+
   const isRunning = computed(
     () =>
       state.value !== 'idle' &&
@@ -30,7 +50,7 @@ export const useInterviewStore = defineStore('interview', () => {
 
   const remainingTime = computed(() => {
     if (!startTime.value || !config.value) return 0
-    const elapsed = Math.floor((Date.now() - startTime.value) / 1000)
+    const elapsed = Math.floor((nowTick.value - startTime.value) / 1000)
     const total = config.value.duration * 60
     return Math.max(0, total - elapsed)
   })
@@ -47,6 +67,7 @@ export const useInterviewStore = defineStore('interview', () => {
   }
 
   function reset() {
+    stopTicker()
     state.value = 'idle'
     messages.value = []
     config.value = null
@@ -68,6 +89,7 @@ export const useInterviewStore = defineStore('interview', () => {
       const res = await interviewApi.startInterview(config.value)
       interviewId.value = res.interviewId
       startTime.value = Date.now()
+      startTicker()
       addMessage('interviewer', res.firstQuestion.content)
       handleAIResponse(res.firstQuestion)
     } catch (e: any) {
@@ -135,6 +157,7 @@ export const useInterviewStore = defineStore('interview', () => {
         state.value = 'waiting_answer'
         break
       case 'end':
+        stopTicker()
         state.value = 'generating_report'
         currentProblem.value = null
         break
@@ -143,6 +166,7 @@ export const useInterviewStore = defineStore('interview', () => {
 
   async function endInterview() {
     if (!interviewId.value) return
+    stopTicker()
     state.value = 'generating_report'
     try {
       await interviewApi.endInterview(interviewId.value)

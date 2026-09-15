@@ -105,6 +105,19 @@ export class LottieAvatarProvider implements AvatarProvider {
     }
   }
 
+  /** 降级模式无姿态体系，以下三个姿态方法均为 no-op（仅为接口对齐） */
+  listen(): void {
+    // no-op
+  }
+
+  think(): void {
+    // no-op
+  }
+
+  interactiveIdle(): void {
+    // no-op
+  }
+
   /** Lottie 走 DOM 自适应，无需额外适配 */
   resize(): void {
     // no-op：浏览器 DOM 尺寸变化自动生效
