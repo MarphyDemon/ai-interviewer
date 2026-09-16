@@ -8,6 +8,8 @@ venv/
 # Build
 dist/
 *.local
+*.tar.gz
+tsconfig.tsbuildinfo
 
 # Environment
 .env

@@ -87,8 +87,33 @@ do_backup() {
 
 do_extract() {
     log_step "解压新版本"
+
+    # 前端产物是带内容哈希的分块，tar 解压不会删除归档中已不存在的旧文件。
+    # 不清空 dist 会导致历次构建的废弃分块不断堆积（且仍可被公开访问，
+    # 里面可能残留旧文案/旧逻辑），因此解压前必须整体清空。
+    if [[ -d dist ]]; then
+        rm -rf dist
+        log_info "已清空旧 dist"
+    fi
+
     tar -xzf "$ARCHIVE"
     log_ok "解压完成"
+
+    # 清理不该进入镜像的残留文件。
+    # 归档里已排除这些内容，但 tar 不会删除服务器上的历史文件，它们会被
+    # Dockerfile 的 COPY server/ 一并打进镜像，因此必须显式清理。
+    local pyc_dirs env_baks
+    pyc_dirs=$(find server -name '__pycache__' -type d 2>/dev/null | wc -l)
+    if [[ "$pyc_dirs" -gt 0 ]]; then
+        find server -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+        log_info "已清理 ${pyc_dirs} 个 __pycache__ 目录（其他 Python 版本的旧字节码）"
+    fi
+
+    env_baks=$(find server -maxdepth 1 -name '.env.bak.*' -type f 2>/dev/null | wc -l)
+    if [[ "$env_baks" -gt 0 ]]; then
+        find server -maxdepth 1 -name '.env.bak.*' -type f -delete 2>/dev/null || true
+        log_info "已清理 ${env_baks} 个 .env 备份（含明文密钥，不可入镜像）"
+    fi
 
     # 保留 .env 配置
     if [[ -f "server/.env" ]]; then

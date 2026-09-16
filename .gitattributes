@@ -7,3 +7,9 @@
 # picking either side (task state lives in task.json, not index.md). See
 # .trellis/spec/cli/backend/directory-structure.md for details.
 .trellis/workspace/*/journal-*.md merge=union
+
+# shell 脚本必须用 LF：CRLF 在 Linux 上会导致
+# `set: pipefail: invalid option name` / `syntax error near unexpected token $'{\r'`
+# 这类错误，使脚本完全无法执行（本项目 core.autocrlf=true，不加此规则 Windows
+# 检出会变成 CRLF，打包上传到 Linux 后即失效）。
+*.sh text eol=lf
