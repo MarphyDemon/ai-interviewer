@@ -11,8 +11,15 @@ const userStore = useUserStore()
 const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const identity = ref<'personal' | 'enterprise'>('personal')
+const orgName = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
+
+const identities = [
+  { value: 'personal', labelKey: 'register.personal', hintKey: 'register.personalHint', icon: '🎯' },
+  { value: 'enterprise', labelKey: 'register.enterprise', hintKey: 'register.enterpriseHint', icon: '🏢' },
+] as const
 
 async function onSubmit() {
   errorMsg.value = ''
@@ -32,10 +39,20 @@ async function onSubmit() {
     errorMsg.value = t('register.passwordMismatch')
     return
   }
+  const isEnterprise = identity.value === 'enterprise'
+  if (isEnterprise && !orgName.value.trim()) {
+    errorMsg.value = t('register.orgNameRequired')
+    return
+  }
   loading.value = true
   try {
-    await userStore.doRegister(username.value.trim(), password.value)
-    router.replace('/setup')
+    await userStore.doRegister(
+      username.value.trim(),
+      password.value,
+      isEnterprise ? orgName.value.trim() : undefined,
+    )
+    // 企业招聘：注册即开通组织并成为 owner，直接进入企业控制台
+    router.replace(isEnterprise ? '/org' : '/setup')
   } catch (e: any) {
     errorMsg.value = e.message || t('register.registerFailed')
   } finally {
@@ -51,6 +68,35 @@ async function onSubmit() {
       <p class="mt-2 text-sm text-gray-500">{{ t('register.subtitle') }}</p>
 
       <form class="mt-6 space-y-4" @submit.prevent="onSubmit">
+        <div>
+          <label class="mb-1.5 block text-sm font-medium text-gray-700">{{ t('register.identity') }}</label>
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              v-for="item in identities"
+              :key="item.value"
+              type="button"
+              @click="identity = item.value"
+              :class="[
+                'rounded-xl border px-3 py-2.5 text-left transition',
+                identity === item.value
+                  ? 'border-primary-400 bg-primary-50'
+                  : 'border-gray-200 hover:bg-gray-50',
+              ]"
+            >
+              <span class="block text-sm font-medium text-gray-900">{{ item.icon }} {{ t(item.labelKey) }}</span>
+              <span class="mt-0.5 block text-xs text-gray-500">{{ t(item.hintKey) }}</span>
+            </button>
+          </div>
+        </div>
+        <div v-if="identity === 'enterprise'">
+          <label class="mb-1.5 block text-sm font-medium text-gray-700">{{ t('register.orgName') }}</label>
+          <input
+            v-model="orgName"
+            type="text"
+            class="input"
+            :placeholder="t('register.orgNamePlaceholder')"
+          />
+        </div>
         <div>
           <label class="mb-1.5 block text-sm font-medium text-gray-700">{{ t('register.username') }}</label>
           <input

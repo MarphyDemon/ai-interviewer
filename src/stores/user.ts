@@ -93,8 +93,8 @@ export const useUserStore = defineStore('user', () => {
     return res.user
   }
 
-  async function doRegister(username: string, password: string) {
-    const res = await authApi.register(username, password)
+  async function doRegister(username: string, password: string, orgName?: string) {
+    const res = await authApi.register(username, password, orgName)
     setToken(res.token)
     user.value = res.user
     return res.user
@@ -105,6 +105,14 @@ export const useUserStore = defineStore('user', () => {
   }
 
   const isAdmin = computed(() => user.value?.role === 'admin')
+
+  /** 企业侧能力（企业控制台 / 实测指标）：有组织归属、企业版套餐或超管 */
+  const isEnterprise = computed(
+    () =>
+      !!user.value?.orgRole ||
+      user.value?.plan === 'enterprise' ||
+      user.value?.role === 'admin',
+  )
 
   const notifications = ref<NotificationItem[]>([])
   const unreadCount = computed(() => notifications.value.filter((n) => !n.isRead).length)
@@ -130,7 +138,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   return {
-    token, user, isLoggedIn, isAdmin,
+    token, user, isLoggedIn, isAdmin, isEnterprise,
     notifications, unreadCount,
     initTokenFromStorage, setToken, clearToken,
     fetchMe, doLogin, doRegister, logout,

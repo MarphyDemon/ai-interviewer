@@ -4,8 +4,9 @@ import type { UserInfo } from '@/types'
 export function register(
   username: string,
   password: string,
+  orgName?: string,
 ): Promise<{ token: string; user: UserInfo }> {
-  return client.post('/auth/register', { username, password })
+  return client.post('/auth/register', { username, password, orgName: orgName || '' })
 }
 
 export function login(

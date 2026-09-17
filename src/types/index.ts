@@ -12,8 +12,13 @@ export interface UserInfo {
   preferredAvatarConfigId: number | null
   preferredPosition: string
   language: 'zh' | 'en'
-  theme: 'light' | 'dark'
+  /** 主题色方案 id，取值见 @/utils/theme 的 THEME_COLORS */
+  theme: string
   notificationSettings: NotificationSettings
+  /** 套餐：个人用户为 free */
+  plan: 'free' | 'standard' | 'enterprise'
+  /** 组织角色：企业侧 owner/hr/viewer，个人用户为 null */
+  orgRole: 'owner' | 'hr' | 'viewer' | null
 }
 
 export interface UserQuota {
