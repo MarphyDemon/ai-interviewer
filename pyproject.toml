@@ -1,0 +1,21 @@
+# Ruff 配置（后端静态检查，CI 中执行 `ruff check server`）
+# 安装：pip install -r server/requirements-dev.txt
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+extend-exclude = ["pg", "py_deps", "data", "node_modules", "dist"]
+
+[tool.ruff.lint]
+# E4/E7/E9：导入与语法类错误；F：Pyflakes；B：bugbear 常见缺陷
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = [
+    "B008", # FastAPI 的 Depends()/Header() 作为默认参数是官方写法
+    "B904", # 暂不强制 raise ... from 异常链写法
+    "E712", # SQLModel/SQLAlchemy 的列比较必须写成 == True / == False
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 这两个文件必须在 import 之前设置环境变量 / 调整 sys.path，E402 属预期行为
+"server/main.py" = ["E402"]
+"server/scripts/migrate_to_pg.py" = ["E402"]
