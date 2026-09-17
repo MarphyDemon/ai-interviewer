@@ -10,13 +10,11 @@
 """
 import json
 import secrets
-import time
 from datetime import datetime, timedelta
 from typing import AsyncGenerator, Optional
 
 from sqlmodel import Session, select
 
-from server.config import settings
 from server.models import (
     AvatarSessionToken,
     ChatConversation,
@@ -73,7 +71,6 @@ def resolve_session(
     session: Session, token_str: str
 ) -> Optional[tuple[User, ChatConversation]]:
     """通过 session token 查找用户和对话。token 无效/过期返回 None。"""
-    from server.services.crypto_service import decrypt
 
     token_obj = session.exec(
         select(AvatarSessionToken).where(AvatarSessionToken.token == token_str)

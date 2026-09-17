@@ -6,6 +6,7 @@ from sqlmodel import Session, select, or_
 from server.database import get_session
 from server.models import KnowledgeDoc, KnowledgeVersion, KnowledgeEditLock, KnowledgeCollaborator, User
 from server.services.knowledge_service import process_knowledge_doc, delete_knowledge
+from server.services.rag_service import delete_doc_chunks
 from server.services.auth_service import get_current_user, require_admin
 import asyncio
 
@@ -169,7 +170,7 @@ async def list_versions(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    doc = _get_doc_or_404(session, doc_id, user)
+    _get_doc_or_404(session, doc_id, user)  # 校验文档存在与访问权限
     versions = session.exec(
         select(KnowledgeVersion)
         .where(KnowledgeVersion.doc_id == doc_id)
@@ -195,7 +196,7 @@ async def get_version(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    doc = _get_doc_or_404(session, doc_id, user)
+    _get_doc_or_404(session, doc_id, user)  # 校验文档存在与访问权限
     version = session.get(KnowledgeVersion, version_id)
     if not version or version.doc_id != doc_id:
         raise HTTPException(404, "版本不存在")
@@ -314,7 +315,7 @@ async def acquire_lock(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    doc = _get_doc_or_404(session, doc_id, user)
+    _get_doc_or_404(session, doc_id, user)  # 校验文档存在与访问权限
     # 检查现有锁
     existing_lock = session.exec(
         select(KnowledgeEditLock).where(KnowledgeEditLock.doc_id == doc_id)
@@ -372,7 +373,7 @@ async def list_collaborators(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    doc = _get_doc_or_404(session, doc_id, user)
+    _get_doc_or_404(session, doc_id, user)  # 校验文档存在与访问权限
     collabs = session.exec(
         select(KnowledgeCollaborator).where(KnowledgeCollaborator.doc_id == doc_id)
     ).all()

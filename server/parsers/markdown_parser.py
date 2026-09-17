@@ -1,6 +1,4 @@
-import os
 import frontmatter
-from pathlib import Path
 from typing import List, Dict, Tuple
 
 

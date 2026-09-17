@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from server.database import get_session
-from server.models import AlgorithmProblem, CodeSubmission, User, LLMConfig
+from server.models import AlgorithmProblem, CodeSubmission, User
 from server.services.auth_service import get_current_user
 from server.services.judge_service import (
     LANGUAGE_TEMPLATES,

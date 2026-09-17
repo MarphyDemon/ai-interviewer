@@ -5,13 +5,9 @@
 - 录制文件通过 storage_service 保存（本地 / S3 均可）。
 - 回放时通过 /api/recordings/{id}/stream 端点流式播放。
 """
-import io
 import uuid
-from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from server.database import get_session

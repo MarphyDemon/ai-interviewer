@@ -1,7 +1,7 @@
 import json
 from typing import Optional
 from sqlmodel import Session, select
-from server.models import Resume, ResumeReport
+from server.models import ResumeReport
 from server.parsers.pdf_parser import extract_text_from_pdf
 from server.parsers.docx_parser import extract_text_from_docx
 from server.services.llm_service import llm_chat

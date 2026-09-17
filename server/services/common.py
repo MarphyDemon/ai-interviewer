@@ -1,7 +1,3 @@
-import json
-import os
-from pathlib import Path
-from typing import Optional
 
 
 def get_or_create_user(session, anonymous_uuid: str) -> int:

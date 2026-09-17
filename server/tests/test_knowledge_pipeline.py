@@ -20,7 +20,6 @@
 import asyncio
 import os
 import sys
-import tempfile
 
 # 确保项目根目录在 sys.path 中
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -150,12 +149,11 @@ def test_get_embeddings_batch_large():
     embeddings = asyncio.run(get_embeddings_batch(texts))
 
     assert len(embeddings) == 40, f"应返回 40 个 embedding，实际 {len(embeddings)}"
-    print(f"[PASS] test_get_embeddings_batch_large (40 条, 自动分 2 批)")
+    print("[PASS] test_get_embeddings_batch_large (40 条, 自动分 2 批)")
 
 
 def test_chromadb_write_and_search():
     """测试9: ChromaDB 写入 + 搜索验证"""
-    import chromadb
     from server.services.rag_service import add_chunks, search, delete_doc_chunks, get_knowledge_collection
 
     # 使用临时 doc_id 避免冲突
@@ -200,12 +198,11 @@ def test_chromadb_write_and_search():
     results_after = collection.get(where={"doc_id": test_doc_id})
     assert len(results_after["ids"]) == 0, "清理后应为空"
 
-    print(f"[PASS] test_chromadb_write_and_search (写入2条, 搜索命中, 清理完成)")
+    print("[PASS] test_chromadb_write_and_search (写入2条, 搜索命中, 清理完成)")
 
 
 def test_full_pipeline_simulation():
     """测试10: 完整流程模拟（解析 -> 分块 -> embedding -> 写入 -> 搜索 -> 删除）"""
-    import chromadb
     from server.services.rag_service import add_chunks, search, delete_doc_chunks, get_knowledge_collection
 
     test_doc_id = 88888

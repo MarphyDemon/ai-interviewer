@@ -1,4 +1,3 @@
-import json
 import time
 import hashlib
 import hmac
@@ -412,7 +411,7 @@ async def get_platform_stats(
     session: Session = Depends(get_session),
     _: str = Depends(require_admin_access),
 ):
-    from server.models import Interview, Report, Notification
+    from server.models import Interview, Report
     total_users = session.exec(select(User)).all()
     total_interviews = session.exec(select(Interview)).all()
     total_reports = session.exec(select(Report)).all()

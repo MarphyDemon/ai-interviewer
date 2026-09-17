@@ -27,14 +27,14 @@ if py_deps.exists():
 # 先 CGI 层禁用 SSL_CERT_FILE（项目已知问题）
 os.environ.pop("SSL_CERT_FILE", None)
 
-from sqlmodel import Session, create_engine, SQLModel, inspect
+from sqlmodel import Session, create_engine, SQLModel
 from server.config import settings
 from server.models import *  # noqa: F401, F403 — 注册所有模型
 
 
 def get_sqlite_tables(engine) -> dict[str, list[dict]]:
     """从 SQLite 读取所有表数据。"""
-    from sqlalchemy import MetaData, Table
+    from sqlalchemy import MetaData
 
     metadata = MetaData()
     metadata.reflect(bind=engine)
@@ -43,7 +43,7 @@ def get_sqlite_tables(engine) -> dict[str, list[dict]]:
         for table_name, table in metadata.tables.items():
             rows = session.execute(table.select()).fetchall()
             columns = [c.name for c in table.columns]
-            data[table_name] = [dict(zip(columns, row)) for row in rows]
+            data[table_name] = [dict(zip(columns, row, strict=False)) for row in rows]
             print(f"  [{table_name}] {len(rows)} 行")
     return data
 

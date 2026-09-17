@@ -18,7 +18,6 @@ from server.services.resume_service import (
 from server.services.auth_service import get_current_user
 from server.services.storage_service import storage
 from server.config import settings
-import asyncio
 
 router = APIRouter(prefix="/api/resume", tags=["resume"])
 

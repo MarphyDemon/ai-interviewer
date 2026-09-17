@@ -1,6 +1,5 @@
 """PDF 报告生成服务"""
 import io
-import json
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
@@ -10,7 +9,7 @@ from reportlab.platypus import (
 )
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.enums import TA_CENTER, TA_LEFT
+from reportlab.lib.enums import TA_CENTER
 
 # 注册中文字体
 import os
@@ -233,10 +232,6 @@ def generate_resume_report_pdf(report: dict) -> bytes:
     body_style = ParagraphStyle(
         "ResumeBody", parent=styles["BodyText"], fontName=font_name,
         fontSize=10, leading=16, spaceAfter=6,
-    )
-    small_style = ParagraphStyle(
-        "ResumeSmall", parent=styles["BodyText"], fontName=font_name,
-        fontSize=9, leading=13, textColor=colors.HexColor("#666666"),
     )
     grade_style = ParagraphStyle(
         "Grade", fontName=font_name, fontSize=48,

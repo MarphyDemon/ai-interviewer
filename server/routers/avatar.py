@@ -1,5 +1,3 @@
-import json
-from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Query
@@ -9,7 +7,7 @@ from sqlmodel import Session, select
 
 from server.config import settings
 from server.database import get_session
-from server.models import AvatarProviderConfig, AvatarSessionToken, ChatConversation, LLMConfig, User
+from server.models import AvatarProviderConfig, ChatConversation, User
 from server.services.crypto_service import decrypt
 from server.services.auth_service import get_current_user
 from server.services.common import get_active_llm_config

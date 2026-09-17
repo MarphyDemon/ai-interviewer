@@ -12,10 +12,8 @@
   # 删除文件
   await storage.delete("resumes/abc.pdf")
 """
-import os
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urljoin
 
 from server.config import settings
 

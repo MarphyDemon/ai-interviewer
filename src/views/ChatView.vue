@@ -297,7 +297,7 @@ async function toggleAvatar() {
 function handleAvatarLLMResponse(response: AgentLLMResponse) {
   if (response.event === 'chunk' && response.text) {
     // 流式追加：创建或追加到 assistant 消息
-    let assistantMsgId = avatarPendingAssistantId.value
+    const assistantMsgId = avatarPendingAssistantId.value
     if (assistantMsgId) {
       const msg = store.currentMessages.find(m => m.id === assistantMsgId)
       if (msg) {
