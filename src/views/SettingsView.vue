@@ -1,12 +1,21 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import * as settingsApi from '@/api/settings'
 import * as adminApi from '@/api/admin'
+import { setLanguage, getLanguage } from '@/i18n'
+import { THEME_COLORS, applyThemeColor, getThemeColor, normalizeThemeColor } from '@/utils/theme'
 import type { NotificationSettings, UserQuota } from '@/types'
 import type { UserListItem } from '@/api/admin'
 
+const { t } = useI18n()
+const route = useRoute()
 const userStore = useUserStore()
+
+/** 由路由守卫重定向而来：该页面（企业控制台 / 实测指标）需要企业身份 */
+const needEnterprise = ref(route.query.needEnterprise === '1')
 
 const activeTab = ref<'personal' | 'platform'>('personal')
 const isSaving = ref(false)
@@ -16,14 +25,14 @@ const personal = ref<{
   preferredAvatarConfigId: number | null
   preferredPosition: string
   language: 'zh' | 'en'
-  theme: 'light' | 'dark'
+  theme: string
   notificationSettings: NotificationSettings
   quota: UserQuota | null
 }>({
   preferredAvatarConfigId: null,
   preferredPosition: '',
-  language: 'zh',
-  theme: 'light',
+  language: getLanguage(),
+  theme: getThemeColor(),
   notificationSettings: { collaboration: true, review: true, system: true },
   quota: null,
 })
@@ -39,13 +48,46 @@ const stats = ref<adminApi.PlatformStats | null>(null)
 
 const isAdmin = computed(() => userStore.isAdmin)
 
-const notifItems: { key: keyof NotificationSettings; label: string }[] = [
-  { key: 'collaboration', label: '协作通知（协作者编辑提醒）' },
-  { key: 'review', label: '审核通知（文档审核结果）' },
-  { key: 'system', label: '系统公告（版本更新等）' },
-]
+const notifItems = computed<{ key: keyof NotificationSettings; label: string }[]>(() => [
+  { key: 'collaboration', label: t('settings.notifCollaboration') },
+  { key: 'review', label: t('settings.notifReview') },
+  { key: 'system', label: t('settings.notifSystem') },
+])
+
+/** 岗位方向：存储值沿用中文（与历史数据一致），展示按当前语言翻译 */
+const POSITION_LABEL_KEYS: Record<string, string> = {
+  前端: 'settings.positions.frontend',
+  后端: 'settings.positions.backend',
+  算法: 'settings.positions.algorithm',
+  产品: 'settings.positions.product',
+  测试: 'settings.positions.testing',
+  测试开发: 'settings.positions.testDev',
+  运维: 'settings.positions.ops',
+}
 
 const positions = ['', '前端', '后端', '算法', '产品', '测试', '测试开发', '运维']
+
+function positionLabel(value: string) {
+  if (!value) return t('settings.notSet')
+  const key = POSITION_LABEL_KEYS[value]
+  return key ? t(key) : value
+}
+
+function planLabel(plan: string) {
+  return t(`settings.plans.${plan}`)
+}
+
+/** 语言切换：立即生效（vue-i18n locale + localStorage）并随设置保存 */
+function selectLanguage(code: 'zh' | 'en') {
+  personal.value.language = code
+  setLanguage(code)
+}
+
+/** 主题色切换：立即改写 <html data-theme>，全站主色随之变化 */
+function selectThemeColor(id: string) {
+  personal.value.theme = id
+  applyThemeColor(id)
+}
 
 // 邀请码兑换
 const inviteCodeInput = ref('')
@@ -88,12 +130,14 @@ async function handleRedeem() {
   try {
     const res = await adminApi.redeemInviteCode(code)
     redeemSuccess.value = true
-    redeemMessage.value = `兑换成功！您的账户已升级为${res.plan === 'standard' ? '标准版' : '企业版'}`
+    redeemMessage.value = t('settings.redeemSuccess', { plan: planLabel(res.plan) })
     inviteCodeInput.value = ''
+    // 兑换到企业版后即可访问企业侧页面
+    if (res.plan === 'enterprise') needEnterprise.value = false
     await loadPersonal()
   } catch (e: any) {
     redeemSuccess.value = false
-    redeemMessage.value = e?.response?.data?.detail || '兑换失败，请检查邀请码是否正确'
+    redeemMessage.value = e?.message || t('settings.redeemFailed')
   } finally {
     redeemLoading.value = false
   }
@@ -102,7 +146,11 @@ async function handleRedeem() {
 async function loadPersonal() {
   try {
     const data = await settingsApi.getPersonalSettings()
-    personal.value = data
+    // 历史数据里的 light / dark 归一化为有效主题色 id，保证按钮选中态正确
+    personal.value = { ...data, theme: normalizeThemeColor(data.theme) }
+    // 服务端保存的偏好立即生效，保证换设备后语言/主题色一致
+    if (data.language) setLanguage(data.language)
+    applyThemeColor(data.theme)
   } catch (e) {
     console.error('加载设置失败', e)
   }
@@ -165,7 +213,15 @@ onMounted(async () => {
 
 <template>
   <div class="max-w-4xl mx-auto p-4 md:p-6">
-    <h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-6">设置</h1>
+    <h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-6">{{ t('settings.title') }}</h1>
+
+    <!-- 企业侧页面守卫提示 -->
+    <div
+      v-if="needEnterprise"
+      class="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-800"
+    >
+      {{ t('settings.enterpriseOnlyHint') }}
+    </div>
 
     <!-- Tab 切换 -->
     <div class="flex border-b border-gray-200 mb-6">
@@ -178,7 +234,7 @@ onMounted(async () => {
             : 'border-transparent text-gray-500 hover:text-gray-700',
         ]"
       >
-        个人设置
+        {{ t('settings.personal') }}
       </button>
       <button
         v-if="isAdmin"
@@ -190,33 +246,33 @@ onMounted(async () => {
             : 'border-transparent text-gray-500 hover:text-gray-700',
         ]"
       >
-        平台管理
+        {{ t('settings.platform') }}
       </button>
     </div>
 
     <!-- 个人设置 -->
     <div v-if="activeTab === 'personal'" class="space-y-6">
       <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">偏好设置</h2>
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">{{ t('settings.preferences') }}</h2>
         <div class="space-y-4">
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">默认岗位方向</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">{{ t('settings.defaultPosition') }}</label>
             <select
               v-model="personal.preferredPosition"
               class="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             >
               <option v-for="p in positions" :key="p" :value="p">
-                {{ p || '未设置' }}
+                {{ positionLabel(p) }}
               </option>
             </select>
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">语言</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">{{ t('settings.language') }}</label>
             <div class="flex gap-2">
               <button
                 v-for="lang in [{ code: 'zh', label: '中文' }, { code: 'en', label: 'English' }]"
                 :key="lang.code"
-                @click="personal.language = lang.code as 'zh' | 'en'"
+                @click="selectLanguage(lang.code as 'zh' | 'en')"
                 :class="[
                   'px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
                   personal.language === lang.code
@@ -229,20 +285,24 @@ onMounted(async () => {
             </div>
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1">主题</label>
-            <div class="flex gap-2">
+            <label class="block text-sm font-medium text-gray-700 mb-1">{{ t('settings.theme') }}</label>
+            <div class="flex flex-wrap gap-2">
               <button
-                v-for="theme in [{ code: 'light', label: '☀️ 亮色' }, { code: 'dark', label: '🌙 暗色' }]"
-                :key="theme.code"
-                @click="personal.theme = theme.code as 'light' | 'dark'"
+                v-for="color in THEME_COLORS"
+                :key="color.id"
+                @click="selectThemeColor(color.id)"
                 :class="[
-                  'px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
-                  personal.theme === theme.code
+                  'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors',
+                  personal.theme === color.id
                     ? 'border-blue-600 bg-blue-50 text-blue-700'
                     : 'border-gray-300 text-gray-700 hover:bg-gray-50',
                 ]"
               >
-                {{ theme.label }}
+                <span
+                  class="h-4 w-4 rounded-full"
+                  :style="{ background: `linear-gradient(135deg, ${color.primary} 0%, ${color.accent} 100%)` }"
+                />
+                {{ t(`settings.themes.${color.id}`) }}
               </button>
             </div>
           </div>
@@ -250,7 +310,7 @@ onMounted(async () => {
       </section>
 
       <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">通知设置</h2>
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">{{ t('settings.notifications') }}</h2>
         <div class="space-y-3">
           <label
             v-for="item in notifItems"
@@ -277,25 +337,25 @@ onMounted(async () => {
       </section>
 
       <section v-if="personal.quota" class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">使用配额</h2>
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">{{ t('settings.quota') }}</h2>
         <div class="grid grid-cols-3 gap-4">
           <div class="text-center p-3 bg-gray-50 rounded-lg">
             <div class="text-2xl font-bold text-gray-900">
               {{ personal.quota.interviewUsed }} / {{ personal.quota.interviewLimit }}
             </div>
-            <div class="text-xs text-gray-500 mt-1">面试次数</div>
+            <div class="text-xs text-gray-500 mt-1">{{ t('settings.interviewCount') }}</div>
           </div>
           <div class="text-center p-3 bg-gray-50 rounded-lg">
             <div class="text-2xl font-bold text-gray-900">
               {{ personal.quota.knowledgeUsed }} / {{ personal.quota.knowledgeLimit }}
             </div>
-            <div class="text-xs text-gray-500 mt-1">知识库文档</div>
+            <div class="text-xs text-gray-500 mt-1">{{ t('settings.knowledgeDocs') }}</div>
           </div>
           <div class="text-center p-3 bg-gray-50 rounded-lg">
             <div class="text-2xl font-bold text-gray-900">
               {{ personal.quota.aiCallsUsed }} / {{ personal.quota.aiCallsLimit }}
             </div>
-            <div class="text-xs text-gray-500 mt-1">AI 调用额度</div>
+            <div class="text-xs text-gray-500 mt-1">{{ t('settings.aiCalls') }}</div>
           </div>
         </div>
         <div class="mt-3 text-center">
@@ -305,7 +365,7 @@ onMounted(async () => {
               'bg-blue-100 text-blue-700': personal.quota.plan === 'standard',
               'bg-purple-100 text-purple-700': personal.quota.plan === 'enterprise',
             }">
-            {{ personal.quota.plan === 'free' ? '免费版' : personal.quota.plan === 'standard' ? '标准版' : '企业版' }}
+            {{ planLabel(personal.quota.plan) }}
           </span>
         </div>
       </section>
@@ -316,25 +376,25 @@ onMounted(async () => {
           :disabled="isSaving"
           class="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
-          {{ isSaving ? '保存中...' : '保存设置' }}
+          {{ isSaving ? t('settings.saving') : t('settings.saveProfile') }}
         </button>
       </div>
 
       <!-- 邀请码兑换 -->
       <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-5">
-        <h2 class="text-lg font-semibold text-gray-900 mb-4">邀请码兑换</h2>
+        <h2 class="text-lg font-semibold text-gray-900 mb-4">{{ t('settings.redeemTitle') }}</h2>
         <div class="flex gap-2">
-          <input v-model="inviteCodeInput" placeholder="输入邀请码"
+          <input v-model="inviteCodeInput" :placeholder="t('settings.redeemPlaceholder')"
             class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 uppercase" />
           <button @click="handleRedeem" :disabled="!inviteCodeInput.trim() || redeemLoading"
             class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {{ redeemLoading ? '兑换中...' : '兑换' }}
+            {{ redeemLoading ? t('settings.redeeming') : t('settings.redeem') }}
           </button>
         </div>
         <p v-if="redeemMessage" :class="['mt-2 text-sm', redeemSuccess ? 'text-green-600' : 'text-red-600']">
           {{ redeemMessage }}
         </p>
-        <p class="text-xs text-gray-400 mt-2">使用邀请码可升级账户套餐，解锁更多面试次数和 AI 调用额度。</p>
+        <p class="text-xs text-gray-400 mt-2">{{ t('settings.redeemHint') }}</p>
       </section>
     </div>
 

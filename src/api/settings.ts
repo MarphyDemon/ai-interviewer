@@ -5,7 +5,8 @@ export interface PersonalSettingsResponse {
   preferredAvatarConfigId: number | null
   preferredPosition: string
   language: 'zh' | 'en'
-  theme: 'light' | 'dark'
+  /** 主题色方案 id，取值见 @/utils/theme 的 THEME_COLORS */
+  theme: string
   notificationSettings: NotificationSettings
   quota: UserQuota
 }
@@ -31,7 +32,7 @@ export function updatePersonalSettings(data: {
   preferredAvatarConfigId?: number | null
   preferredPosition?: string
   language?: 'zh' | 'en'
-  theme?: 'light' | 'dark'
+  theme?: string
   notificationSettings?: NotificationSettings
 }): Promise<{ ok: boolean }> {
   return client.put('/settings/personal', data)

@@ -8,6 +8,7 @@ import { useUserStore } from '@/stores/user'
 import { useDevice } from '@/composables/useDevice'
 import { detectHost } from '@/utils/bridge'
 import { getRuntimeMode, type RuntimeModeResponse } from '@/api/settings'
+import { applyThemeColor, getThemeColor } from '@/utils/theme'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -35,8 +36,14 @@ const modeHint = computed(() => {
 })
 
 onMounted(async () => {
+  // 首屏先用本地记忆的主题色，避免闪回默认色
+  applyThemeColor(getThemeColor())
   await userStore.initTokenFromStorage()
-  if (userStore.isLoggedIn) userStore.fetchMe()
+  if (userStore.isLoggedIn) {
+    await userStore.fetchMe()
+    // 已登录用户以服务端保存的主题色为准
+    if (userStore.user?.theme) applyThemeColor(userStore.user.theme)
+  }
   try {
     runtimeMode.value = (await getRuntimeMode()).mode
   } catch {
