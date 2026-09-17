@@ -9,3 +9,9 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 *.md
+# 构建产物
+dist/
+# 环境变量（含凭证）/ Compose 凭证文件，禁止打进镜像
+.env
+.env.local
+server/.env

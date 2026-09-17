@@ -1,3 +1,15 @@
+# ============================================
+# 一键启动（评审 / 演示推荐）
+#
+#   1) （可选）配置凭证：cp .env.example .env 并填入 Key
+#      不配置也能启动，只是 LLM 出题/点评与具身交互智能体播报不可用
+#   2) docker compose up -d --build
+#   3) 打开 http://localhost:8080
+#
+# 开发模式（源码热更新）请用：
+#   docker compose -f docker-compose.dev.yml up -d
+# ============================================
+
 services:
   # PostgreSQL 数据库
   postgres:
@@ -6,11 +18,16 @@ services:
     environment:
       POSTGRES_DB: ai_interviewer
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ai_interviewer"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     restart: unless-stopped
 
   # 后端 API（FastAPI + Python）
@@ -23,37 +40,41 @@ services:
         - PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
     container_name: ai-interviewer-backend
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/ai_interviewer
-    env_file:
-      - server/.env
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ai_interviewer
+      - AVATAR_APP_ID=${AVATAR_APP_ID:-}
+      - AVATAR_APP_SECRET=${AVATAR_APP_SECRET:-}
+      - AVATAR_GATEWAY_SERVER=${AVATAR_GATEWAY_SERVER:-https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session}
+      - AVATAR_PROXY_BASE_URL=${AVATAR_PROXY_BASE_URL:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-deepseek-chat}
+      - EMBEDDING_API_KEY=${EMBEDDING_API_KEY:-}
+      - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL:-https://api.siliconflow.cn/v1}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-change-me-in-production-32bytes!!}
+      # 离线规则模式（无模型、无 Key 也能跑通面试主流程）：OFFLINE_MODE=true docker compose up -d
+      - OFFLINE_MODE=${OFFLINE_MODE:-false}
     volumes:
-      - ./:/app
       - ./data:/app/data
     ports:
       - "8000:8000"
-    command: uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
     restart: unless-stopped
 
-  # 前端开发服务（Vite）
+  # 前端（Vite 构建产物 + Nginx 反向代理）
   frontend:
-    image: node:20-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
     container_name: ai-interviewer-frontend
-    working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    volumes:
-      - ./:/app
-      - node_modules:/app/node_modules
-    ports:
-      - "5173:5173"
-    environment:
-      - NODE_ENV=development
-      - VITE_API_PROXY=http://backend:8000
     depends_on:
       - backend
+    ports:
+      - "${APP_PORT:-8080}:80"
     restart: unless-stopped
 
 volumes:
   postgres_data:
-  node_modules:

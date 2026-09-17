@@ -1,0 +1,23 @@
+# ============================================
+# 前端镜像：Vite 构建 + Nginx 托管（多阶段）
+# 供 docker-compose.yml 一键启动使用
+# ============================================
+
+FROM node:20-alpine AS build
+
+WORKDIR /app
+
+# 先装依赖，利用 Docker 层缓存
+# .npmrc 内含 @xmov 私有源配置，构建时需能访问 npm.xmov.ai 与 npmjs.org
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --no-audit --no-fund
+
+COPY . .
+RUN npm run build:web
+
+FROM nginx:alpine
+
+COPY --from=build /app/dist /usr/share/nginx/html
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80

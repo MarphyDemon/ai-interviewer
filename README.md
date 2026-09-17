@@ -1,12 +1,12 @@
 # 🤖 AI 面试官
 
-> 一款基于 AI 数字人的模拟面试平台。用户上传简历、选择岗位方向，由数字人面试官按题库知识点和简历内容进行语音/文字问答，结束后输出多维度点评报告。
+> 一款基于具身交互智能体的 AI 模拟面试平台。用户上传简历、选择岗位方向，由具身交互智能体面试官按题库知识点和简历内容进行语音/文字问答，结束后输出多维度点评报告。
 
 ---
 
 ## ✨ 核心特性
 
-- 🎭 **数字人面试官** — 3D 数字人形象 + 语音交互，贴近真实面试场景（支持 WebGL 硬件加速 / Lottie 动画降级）
+- 🎭 **具身交互智能体面试官** — 3D 具身交互智能体形象 + 语音交互，贴近真实面试场景（支持 WebGL 硬件加速 / Lottie 动画降级）
 - 📚 **知识驱动出题** — Markdown 题库 + RAG 检索，AI 基于知识点自主生成题目与参考答案
 - 📄 **简历针对性** — PDF/Word 简历解析，AI 基于简历内容进行针对性追问和人岗匹配评估
 - 💬 **语音优先交互** — 麦克风录音 → ASR 转文字 → AI 追问 → TTS 语音播报，支持文字输入兜底
@@ -26,7 +26,7 @@
 | 路由 | Vue Router 4 |
 | 国际化 | vue-i18n (中/英) |
 | 代码编辑器 | Monaco Editor |
-| 数字人 SDK | @xmov/avatar |
+| 具身交互智能体 SDK | @xmov/avatar |
 | 动画降级 | vue3-lottie |
 | 后端框架 | FastAPI + Uvicorn |
 | ORM | SQLModel (SQLAlchemy) |
@@ -49,7 +49,7 @@ ai-interviewer/
 │   │   ├── common/             # 导航、TabBar 等
 │   │   └── DeviceCheckModal.vue
 │   ├── composables/            # 组合式函数
-│   │   ├── useAvatar.ts        # 数字人面试官管理
+│   │   ├── useAvatar.ts        # 具身交互智能体面试官管理
 │   │   ├── useDevice.ts        # 设备检测
 │   │   ├── useMobile.ts        # 移动端工具
 │   │   ├── useMediaDevices.ts  # 摄像头/麦克风
@@ -85,7 +85,9 @@ ai-interviewer/
 ├── data/                       # 运行时数据 (上传文件、录屏等)
 ├── docs/                       # 项目文档
 ├── Dockerfile                  # 后端 Docker 镜像
-├── docker-compose.yml          # 编排 (Postgres + Backend + Frontend)
+├── Dockerfile.frontend         # 前端 Docker 镜像 (Vite 构建 + Nginx)
+├── docker-compose.yml          # 一键启动编排 (Postgres + Backend + Frontend)
+├── docker-compose.dev.yml      # 开发模式编排 (源码挂载 + 热更新)
 ├── capacitor.config.ts         # Capacitor 配置
 ├── vite.config.ts              # Vite 配置
 ├── package.json                # 前端依赖
@@ -158,6 +160,9 @@ npm run dev
 
 ## ⚙️ 配置说明
 
+> 本地源码启动 / Docker 开发模式读取 `server/.env`（模板 `server/.env.example`）；
+> Docker 一键启动读取根目录 `.env`（模板 `.env.example`）。两处变量名一致。
+
 ### 后端环境变量 (`server/.env`)
 
 | 变量 | 说明 | 默认值 |
@@ -169,8 +174,8 @@ npm run dev
 | `EMBEDDING_API_KEY` | Embedding API Key | — |
 | `EMBEDDING_BASE_URL` | Embedding API 地址 | `https://api.siliconflow.cn/v1` |
 | `EMBEDDING_MODEL` | Embedding 模型 | `BAAI/bge-m3` |
-| `AVATAR_APP_ID` | 数字人 App ID | — |
-| `AVATAR_APP_SECRET` | 数字人 App Secret | — |
+| `AVATAR_APP_ID` | 具身交互智能体 App ID | — |
+| `AVATAR_APP_SECRET` | 具身交互智能体 App Secret | — |
 | `ADMIN_PASSWORD` | 管理员密码 | `admin123` |
 | `S3_ENDPOINT` | S3 兼容存储地址 (可选) | — |
 | `S3_ACCESS_KEY` | S3 Access Key | — |
@@ -190,35 +195,84 @@ npm run dev
 
 ## 🐳 Docker 部署
 
-### 一键启动
+提供三种运行方式，按"是否需要凭证 / 是否需要下载模型"选择：
+
+| 方式 | 需要什么 | 出题与点评 | 具身播报 | 首次启动 |
+|---|---|---|---|---|
+| **一、云端凭证** | LLM / Embedding / 魔珐凭证 | 云端大模型（质量最好） | ✅ 口型 / 表情 / 关键动作 | 构建镜像 |
+| **二、本地大模型** | 无需任何凭证 | 本地 Ollama（qwen2.5:3b） | ⚠️ 降级为 Lottie + 浏览器语音 | 下载约 2.5GB 模型 |
+| **三、离线规则** | 无需凭证、无需下载 | 内置题库 + 规则模板（非大模型） | ⚠️ 同上 | 秒级 |
+
+### 方式一：云端凭证（功能最全）
 
 ```bash
-docker compose up -d
+# 1) 配置凭证
+cp .env.example .env        # Windows: copy .env.example .env
+#    填入 LLM_API_KEY / EMBEDDING_API_KEY / AVATAR_APP_ID / AVATAR_APP_SECRET
+
+# 2) 构建并启动（PostgreSQL + 后端 + 前端 Nginx）
+docker compose up -d --build
 ```
 
-服务启动后：
-- 前端: `http://localhost:5173`
+**凭证从哪来**
+
+- 具身交互智能体（魔珐星云）：[官网注册](https://www.xingyun3d.com)，本赛题邀请码 `XJKA436Y6J`（注册即送 1000 积分）
+- LLM：任选 OpenAI 兼容服务（DeepSeek / 阿里百炼 / 火山方舟等）
+- Embedding：硅基流动 `BAAI/bge-m3`（有免费额度）
+
+### 方式二：本地大模型（无凭证，AI 链路完整）
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local-llm.yml up -d --build
+```
+
+额外启动 [Ollama](https://ollama.com) 并拉取两个模型（模型就绪后才启动后端）：
+
+| 用途 | 模型 |
+|---|---|
+| 面试官大脑（LLM） | `qwen2.5:3b`（可用 `LOCAL_LLM_MODEL=qwen2.5:7b` 换更大的） |
+| 题库向量化（Embedding） | `bge-m3`（1024 维，与云端 bge-m3 一致） |
+
+> 下载慢或不想下载模型时，请用方式三。
+
+### 方式三：离线规则模式（零依赖，秒级启动）
+
+```bash
+OFFLINE_MODE=true docker compose up -d --build
+# Windows PowerShell: $env:OFFLINE_MODE="true"; docker compose up -d --build
+```
+
+不调用任何模型，用**内置题库 + 规则模板**驱动"出题 → 追问 → 算法题 → 判题 → 报告"全流程；知识库检索退化为关键词匹配。判题仍走真实 Judge0 CE（公网 API）。
+
+> 该模式**不是大模型**：出题来自题库，点评由"回答长度 / 技术关键词覆盖 / 表达结构"等可解释规则计算，页面顶部会显示模式提示条。适合评审在无网络、无凭证环境下快速验证端到端流程。
+
+启动后（三种方式一致）：
+
+- 前端: `http://localhost:8080`（端口可用 `APP_PORT` 修改）
 - 后端: `http://localhost:8000`
 - PostgreSQL: `localhost:5432`
+- Ollama: `localhost:11434`（仅方式二）
 
-### 仅启动后端 + 数据库
+> 方式二、三下**无需任何云端 Key**；具身播报走魔珐云端 TTSA，未配置 `AVATAR_APP_ID` / `AVATAR_APP_SECRET` 时前端自动降级为 Lottie 形象 + 浏览器语音（Web Speech）。
+
+> 首次构建需要联网拉取依赖：pip 走 `PIP_INDEX_URL`（默认阿里云镜像），npm 需能访问 `npmjs.org` 与 `npm.xmov.ai`（`@xmov/avatar` 所在源）。
+
+### 开发模式（源码挂载 + 热更新）
 
 ```bash
-docker compose up -d postgres backend
+cp server/.env.example server/.env    # 按需填写，可留空
+docker compose -f docker-compose.dev.yml up -d
 ```
 
-### 查看日志
+前端 `http://localhost:5173`，后端 `http://localhost:8000`（`--reload`，改动即生效）。
+
+### 常用命令
 
 ```bash
-docker compose logs -f backend
-docker compose logs -f frontend
-```
-
-### 停止服务
-
-```bash
-docker compose down          # 停止 (保留数据)
-docker compose down -v       # 停止并删除数据卷
+docker compose logs -f backend        # 查看日志
+docker compose ps                     # 查看状态
+docker compose down                   # 停止 (保留数据)
+docker compose down -v                # 停止并删除数据卷
 ```
 
 ---
@@ -311,12 +365,14 @@ python server/scripts/migrate_to_pg.py
 | `npm run build:capacitor` | Capacitor 模式构建 |
 | `npm run build:miniprogram` | 小程序模式构建 |
 | `npm run typecheck` | TypeScript 类型检查 |
+| `npm run lint` | ESLint 代码检查（TS + Vue） |
 | `npm run preview` | 本地预览构建产物 |
 
 ---
 
 ## 📖 文档
 
+- [项目说明](docs/项目说明.md) — 技术架构、创新点、能力现状与边界（对外版）
 - [需求文档](docs/需求文档.md)
 - [技术方案](docs/技术方案.md)
 - [三期技术方案 - 跨端移动与小程序](docs/三期技术方案-跨端移动与小程序.md)
@@ -327,4 +383,4 @@ python server/scripts/migrate_to_pg.py
 
 ## 📄 License
 
-Private — All Rights Reserved
+本项目基于 [MIT License](LICENSE) 开源，Copyright (c) 2026 MarphyDemon。
