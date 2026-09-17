@@ -10,6 +10,7 @@ import type {
   InterviewChoice,
 } from '@/types'
 import * as interviewApi from '@/api/interview'
+import type { InviteStartResult } from '@/api/invite'
 import { useInterviewEvents } from '@/composables/useInterviewEvents'
 
 export const useInterviewStore = defineStore('interview', () => {
@@ -108,6 +109,29 @@ export const useInterviewStore = defineStore('interview', () => {
       state.value = 'error'
       errorMsg.value = e.message
     }
+  }
+
+  /**
+   * 候选人凭邀请链接进入后接管面试状态。
+   * token 由后端签发（role="candidate" 的无密码用户），由调用方写入 user store，
+   * 之后面试页与个人练习走的是完全相同的接口与状态机。
+   */
+  function startFromInvite(payload: InviteStartResult) {
+    reset()
+    const lang = (localStorage.getItem('lang') as 'en' | 'zh') || 'en'
+    config.value = {
+      position: payload.config.position,
+      difficulty: payload.config.difficulty as InterviewConfig['difficulty'],
+      duration: payload.config.duration,
+      style: payload.config.style as InterviewConfig['style'],
+      lang,
+    }
+    interviewId.value = payload.interviewId
+    startTime.value = Date.now()
+    startTicker()
+    state.value = 'initializing'
+    addMessage('interviewer', payload.firstQuestion.content)
+    handleAIResponse(payload.firstQuestion as AIResponse)
   }
 
   async function submitAnswer(answer: string) {
@@ -267,6 +291,7 @@ export const useInterviewStore = defineStore('interview', () => {
     addMessage,
     reset,
     start,
+    startFromInvite,
     submitAnswer,
     submitCode,
     applyStage,

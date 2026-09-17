@@ -85,6 +85,18 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/org',
+      name: 'org',
+      component: () => import('@/views/OrgView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/invite/:token',
+      name: 'invite',
+      component: () => import('@/views/InviteEntryView.vue'),
+      meta: { public: true, bare: true },
+    },
+    {
       path: '/profile',
       name: 'profile',
       component: () => import('@/views/ProfileView.vue'),

@@ -18,6 +18,7 @@ const links = computed(() => {
     { name: 'code', to: '/code', label: t('nav.codePractice') },
     { name: 'history', to: '/history', label: t('nav.history') },
     { name: 'metrics', to: '/metrics', label: t('nav.metrics') },
+    { name: 'org', to: '/org', label: t('nav.org') },
   ]
   if (userStore.isAdmin) {
     list.push({ name: 'admin', to: '/admin', label: t('nav.admin') })

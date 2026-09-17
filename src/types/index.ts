@@ -7,7 +7,8 @@ export interface NotificationSettings {
 export interface UserInfo {
   id: number
   username: string
-  role: 'user' | 'admin'
+  /** candidate：由候选人邀请链接创建的无密码用户（不能登录，仅用于作答） */
+  role: 'user' | 'admin' | 'candidate'
   preferredAvatarConfigId: number | null
   preferredPosition: string
   language: 'zh' | 'en'
