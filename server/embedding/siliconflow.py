@@ -1,6 +1,5 @@
 import os
 import ssl
-import asyncio
 import httpx
 import certifi
 from server.config import settings
@@ -14,8 +13,34 @@ if _cert_file and not os.path.exists(_cert_file):
 _ctx = ssl.create_default_context(cafile=certifi.where())
 
 
+async def _embed_ollama(texts: list[str]) -> list[list[float]]:
+    """本地 Ollama 原生 /api/embed（见 docker-compose.local-llm.yml）。
+
+    与云端 API 的差异：不支持 batch_size 概念（一次可传数组），
+    响应字段为 `embeddings`（而非 OpenAI 的 `data[].embedding`）。
+    """
+    base = settings.embedding_base_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=300) as client:
+        resp = await client.post(
+            f"{base}/api/embed",
+            json={"model": settings.embedding_model, "input": texts},
+        )
+        if resp.status_code != 200:
+            print(f"[Embedding] Ollama returned {resp.status_code}: {resp.text[:500]}")
+            resp.raise_for_status()
+        data = resp.json()
+        return [[float(x) for x in emb] for emb in data["embeddings"]]
+
+
 async def get_embeddings_batch(texts: list[str], batch_size: int = 32) -> list[list[float]]:
     """批量获取 embedding，硅基流动单次最多 32 条"""
+    if settings.offline_mode:
+        # 离线规则模式不做向量化，检索走 offline_service.keyword_search
+        raise RuntimeError("离线规则模式（OFFLINE_MODE=true）不提供 Embedding，请改用关键词检索")
+
+    if settings.embedding_provider == "ollama":
+        return await _embed_ollama(texts)
+
     results: list[list[float]] = []
     async with httpx.AsyncClient(timeout=60, verify=_ctx) as client:
         for i in range(0, len(texts), batch_size):

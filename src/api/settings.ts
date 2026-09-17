@@ -10,6 +10,19 @@ export interface PersonalSettingsResponse {
   quota: UserQuota
 }
 
+export interface RuntimeModeResponse {
+  /** cloud=云端凭证 ｜ local-llm=本地 Ollama ｜ offline=离线规则模式 ｜ unconfigured=未配置 */
+  mode: 'cloud' | 'local-llm' | 'offline' | 'unconfigured'
+  llmModel: string
+  embeddingProvider: string
+  avatarConfigured: boolean
+}
+
+/** 当前运行模式（无凭证部署时，前端据此提示能力边界） */
+export function getRuntimeMode(): Promise<RuntimeModeResponse> {
+  return client.get('/mode')
+}
+
 export function getPersonalSettings(): Promise<PersonalSettingsResponse> {
   return client.get('/settings/personal')
 }

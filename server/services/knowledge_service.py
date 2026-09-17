@@ -1,13 +1,12 @@
 import json
-import asyncio
 import traceback
-from typing import Optional
 from sqlmodel import Session, select
 from server.models import KnowledgeDoc, KnowledgeVersion
 from server.parsers.markdown_parser import parse_markdown, chunk_markdown
 from server.embedding.siliconflow import get_embeddings_batch
 from server.services.rag_service import add_chunks, delete_doc_chunks
 from server.services.llm_service import llm_chat
+from server.config import settings
 
 
 async def _extract_metadata_from_content(content: str) -> dict:
@@ -123,6 +122,8 @@ def delete_knowledge(session: Session, doc_id: int):
     doc = session.get(KnowledgeDoc, doc_id)
     if not doc:
         return
-    delete_doc_chunks(doc_id)
+    if not settings.offline_mode:
+        # 离线规则模式从未写入向量库，无需清理
+        delete_doc_chunks(doc_id)
     session.delete(doc)
     session.commit()

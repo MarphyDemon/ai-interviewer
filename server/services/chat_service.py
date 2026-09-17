@@ -1,14 +1,17 @@
 from datetime import datetime
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 from sqlmodel import Session, select
 from server.models import ChatConversation, ChatMessage
-from server.services.common import get_active_llm_config
+from server.services import offline_service
+from server.services.llm_service import llm_chat_stream
 from server.services.rag_service import search
 from server.embedding.siliconflow import get_embedding
 
 
-async def _retrieve_knowledge(query: str, top_k: int = 5) -> str:
+async def _retrieve_knowledge(session: Session, query: str, top_k: int = 5) -> str:
     """检索知识库（不过滤岗位），返回拼接的上下文。失败时返回空串，退化为纯 LLM 回答。"""
+    if offline_service.enabled():
+        return "\n---\n".join(offline_service.keyword_search(session, query, top_k=top_k))
     try:
         embedding = await get_embedding(query)
         results = search(embedding, top_k=top_k)
@@ -55,28 +58,19 @@ async def stream_chat(
     session.commit()
 
     # 4. RAG 检索知识库
-    knowledge = await _retrieve_knowledge(user_message)
+    knowledge = await _retrieve_knowledge(session, user_message)
 
     # 5. 构建消息列表
     messages = [{"role": "system", "content": _build_system_prompt(knowledge)}]
     for m in history:
         messages.append({"role": m.role, "content": m.content})
 
-    # 6. 流式生成
-    cfg = get_active_llm_config(session)
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+    # 6. 流式生成（离线规则模式下由 llm_chat_stream 内部切换到规则应答）
     full_response = ""
-    stream = await client.chat.completions.create(
-        model=cfg.model, messages=messages, stream=True
-    )
     try:
-        async for chunk in stream:
-            delta = chunk.choices[0].delta.content or ""
-            if delta:
-                full_response += delta
-                yield delta
+        async for delta in llm_chat_stream(messages, session=session):
+            full_response += delta
+            yield delta
     finally:
         # 无论正常结束还是客户端打断（GeneratorExit），都持久化已生成内容
         if full_response:

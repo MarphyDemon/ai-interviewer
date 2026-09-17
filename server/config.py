@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,8 +20,14 @@ class Settings(BaseSettings):
     embedding_api_key: str = ""
     embedding_base_url: str = "https://api.siliconflow.cn/v1"
     embedding_model: str = "BAAI/bge-m3"
+    # Embedding 提供方：openai = OpenAI 兼容 /embeddings（默认）；ollama = 本地 Ollama 原生 /api/embed
+    embedding_provider: str = "openai"
 
     admin_password: str = "admin123"
+
+    # 离线规则模式：无需 LLM / Embedding 凭证，用内置题库 + 规则模板跑通面试主流程。
+    # 仅用于零依赖演示，能力边界见 server/services/offline_service.py 顶部说明。
+    offline_mode: bool = False
 
     # 面试播报是否允许注入 SSML 标签（<ue4event> 关键动作 / <uievent> 控件）
     # 依赖 Agent 模式下文本能原样透传到 TTSA（待验证项 Q4）。

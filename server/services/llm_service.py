@@ -3,6 +3,7 @@ from openai import AsyncOpenAI
 from sqlmodel import Session
 from fastapi import HTTPException
 from server.services.common import get_active_llm_config
+from server.services import offline_service
 
 
 def get_llm_client(session: Session) -> tuple[AsyncOpenAI, str]:
@@ -11,7 +12,8 @@ def get_llm_client(session: Session) -> tuple[AsyncOpenAI, str]:
     if not api_key or api_key.startswith("<"):
         raise HTTPException(
             500,
-            "LLM API Key 未配置。请在 server/.env 中填入 LLM_API_KEY，或在管理页配置 LLM 供应商。",
+            "LLM API Key 未配置。请在 server/.env 中填入 LLM_API_KEY，或在管理页配置 LLM 供应商。"
+            "若没有云端凭证，可改用本地大模型或离线规则模式（见 README「Docker 部署」）。",
         )
     return AsyncOpenAI(base_url=cfg.base_url, api_key=api_key), cfg.model
 
@@ -21,6 +23,9 @@ async def llm_chat(
     session: Optional[Session] = None,
     json_mode: bool = False,
 ) -> str:
+    if offline_service.enabled():
+        return offline_service.answer(messages, json_mode=json_mode)
+
     if session:
         client, model = get_llm_client(session)
     else:
@@ -49,6 +54,11 @@ async def llm_chat_stream(
     session: Optional[Session] = None,
 ) -> AsyncGenerator[str, None]:
     """流式 LLM 对话，逐 chunk 产出文本。"""
+    if offline_service.enabled():
+        async for delta in offline_service.stream(messages):
+            yield delta
+        return
+
     if session:
         client, model = get_llm_client(session)
     else:

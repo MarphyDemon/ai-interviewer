@@ -1,0 +1,69 @@
+# ============================================
+# 本地大模型模式：无需任何云端 Key 即可跑通 AI 链路
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local-llm.yml up -d --build
+#
+# 相对默认编排额外做三件事：
+#   1. 启动 Ollama（本地推理服务）
+#   2. 拉取两个模型：qwen2.5:3b（面试官大脑）+ bge-m3（题库向量化，1024 维）
+#   3. 把后端的 LLM / Embedding 指向本地 Ollama
+#
+# 首次启动需下载约 2.5GB 模型（之后走本地缓存），模型就绪后后端才会启动。
+# 模型可换：LOCAL_LLM_MODEL=qwen2.5:7b docker compose -f ... up -d
+#
+# 注意：具身播报走魔珐云端 TTSA，仍需 AVATAR_APP_ID / AVATAR_APP_SECRET；
+#      未配置时前端会自动降级为 Lottie 形象 + 浏览器语音（Web Speech）。
+# ============================================
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-interviewer-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+    # 有 NVIDIA GPU 时可启用（需 nvidia-container-toolkit）
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # 一次性任务：等待 Ollama 就绪并拉取模型（必须与 ollama 共用模型卷，否则拉取的模型会随容器销毁）
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: ai-interviewer-ollama-init
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until ollama list >/dev/null 2>&1; do echo "等待 Ollama 就绪…"; sleep 3; done
+        ollama pull ${LOCAL_LLM_MODEL:-qwen2.5:3b}
+        ollama pull ${LOCAL_EMBEDDING_MODEL:-bge-m3}
+        echo "本地模型已就绪"
+    restart: "no"
+
+  backend:
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      - LLM_BASE_URL=http://ollama:11434/v1
+      - LLM_API_KEY=ollama
+      - LLM_MODEL=${LOCAL_LLM_MODEL:-qwen2.5:3b}
+      - EMBEDDING_PROVIDER=ollama
+      - EMBEDDING_BASE_URL=http://ollama:11434
+      - EMBEDDING_API_KEY=ollama
+      - EMBEDDING_MODEL=${LOCAL_EMBEDDING_MODEL:-bge-m3}
+
+volumes:
+  ollama_data:
