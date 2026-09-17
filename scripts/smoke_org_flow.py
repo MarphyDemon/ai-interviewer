@@ -52,6 +52,39 @@ org_body = org.json()
 check("开通后角色为 owner", org_body.get("role") == "owner", str(org_body.get("role")))
 check("可管理组织", org_body.get("canManage") is True)
 
+# 1b. 企业招聘身份注册：注册时传 orgName，直接建组织并成为 owner
+ent = client.post(
+    "/api/auth/register",
+    json={"username": f"ent_{suffix}", "password": "pass12345", "orgName": f"{suffix} 科技"},
+)
+check("企业身份注册", ent.status_code == 200, ent.text[:200])
+ent_body = ent.json()
+check(
+    "企业注册返回 orgRole=owner",
+    ent_body["user"].get("orgRole") == "owner",
+    str(ent_body["user"].get("orgRole")),
+)
+ent_token = ent_body["token"]
+ent_org = client.get("/api/org/me", headers=auth(ent_token))
+check(
+    "企业注册即开通组织",
+    ent_org.status_code == 200 and ent_org.json()["name"] == f"{suffix} 科技",
+    ent_org.text[:200],
+)
+check("企业注册者可直接管理组织", ent_org.json().get("canManage") is True)
+
+# 1c. 个人身份注册：不建组织（orgRole 为空）
+solo = client.post("/api/auth/register", json={"username": f"solo_{suffix}", "password": "pass12345"})
+check("个人注册 orgRole 为空", solo.json()["user"].get("orgRole") is None, str(solo.json()["user"].get("orgRole")))
+
+# 1d. /auth/me 返回 plan / orgRole，供前端路由守卫判定企业身份
+me_ent = client.get("/api/auth/me", headers=auth(ent_token))
+check(
+    "me 返回 plan 与 orgRole",
+    me_ent.json().get("plan") == "free" and me_ent.json().get("orgRole") == "owner",
+    me_ent.text[:200],
+)
+
 # 2. 创建候选人邀请
 inv = client.post(
     "/api/org/invites",
