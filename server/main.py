@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from server.database import engine, init_db
-from server.routers import knowledge, resume, interview, report, admin, avatar, chat, jd, auth, code, files, recordings, settings
+from server.routers import knowledge, resume, interview, report, admin, avatar, chat, jd, auth, code, files, recordings, settings, metrics, profile
 from server.services.avatar_brain_service import (
     resolve_session,
     generate_stream,
@@ -59,11 +59,24 @@ app.include_router(jd.router)
 app.include_router(code.router)
 app.include_router(files.router)
 app.include_router(recordings.router)
+app.include_router(metrics.router)
+app.include_router(profile.router)
 
 
 @app.on_event("startup")
 def on_startup():
     init_db()
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """回收 MCP 子进程，避免热重载残留。"""
+    try:
+        from server.services.mcp_service import shutdown_all
+
+        await shutdown_all()
+    except Exception as e:
+        print(f"[MCP] shutdown failed: {e}")
 
 
 @app.post("/v1/chat/completions")
@@ -224,3 +237,32 @@ async def root_v1_chat_completions(
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "AI Interviewer API"}
+
+
+@app.get("/api/mode")
+async def runtime_mode():
+    """当前运行模式，供前端展示提示条。
+
+    - cloud：已配置云端 LLM 凭证
+    - local-llm：LLM 指向本地 Ollama（无需云端凭证）
+    - offline：离线规则模式（无模型，题库 + 规则驱动）
+    - unconfigured：未配置 LLM
+    """
+    from server.config import settings as app_settings
+
+    url = (app_settings.llm_base_url or "").lower()
+    if app_settings.offline_mode:
+        mode = "offline"
+    elif "ollama" in url or "11434" in url:
+        mode = "local-llm"
+    elif app_settings.llm_api_key and not app_settings.llm_api_key.startswith("<"):
+        mode = "cloud"
+    else:
+        mode = "unconfigured"
+
+    return {
+        "mode": mode,
+        "llmModel": app_settings.llm_model,
+        "embeddingProvider": app_settings.embedding_provider,
+        "avatarConfigured": bool(app_settings.avatar_app_id and app_settings.avatar_app_secret),
+    }

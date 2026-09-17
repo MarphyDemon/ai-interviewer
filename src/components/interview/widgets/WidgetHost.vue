@@ -8,6 +8,7 @@ import QuestionCardWidget from './QuestionCardWidget.vue'
 import JudgeResultWidget from './JudgeResultWidget.vue'
 import InterviewReportWidget from './InterviewReportWidget.vue'
 import ScoreWidget from './ScoreWidget.vue'
+import PickerWidget from './PickerWidget.vue'
 
 /**
  * Widget 宿主：按类型分发到具体组件，负责堆叠、关闭与动效。
@@ -25,6 +26,7 @@ const registry = {
   judge_result: JudgeResultWidget,
   interview_report: InterviewReportWidget,
   score: ScoreWidget,
+  picker: PickerWidget,
 } as const
 
 type RegisteredType = keyof typeof registry

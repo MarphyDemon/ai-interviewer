@@ -3,6 +3,7 @@ import type {
   InterviewEmotionEvent,
   InterviewEvent,
   InterviewMetrics,
+  InterviewStage,
   InterviewWidget,
 } from '@/types'
 import { getApiBaseURL, getToken } from '@/api/client'
@@ -20,6 +21,7 @@ const widgets = ref<InterviewWidget[]>([])
 const metrics = ref<InterviewMetrics | null>(null)
 const activeTool = ref<string | null>(null)
 const lastEmotion = ref<InterviewEmotionEvent | null>(null)
+const stage = ref<InterviewStage | null>(null)
 const connected = ref(false)
 
 let source: EventSource | null = null
@@ -64,6 +66,12 @@ function clearWidgets() {
   widgets.value = []
 }
 
+/** 按类型批量移除（例如交互控件点选后收起全部 picker） */
+function removeWidgetsOfType(type: InterviewWidget['type']) {
+  const ids = widgets.value.filter((w) => w.type === type).map((w) => w.id)
+  ids.forEach((id) => removeWidget(id))
+}
+
 function handleEvent(evt: InterviewEvent) {
   switch (evt.type) {
     case 'widget':
@@ -81,7 +89,23 @@ function handleEvent(evt: InterviewEvent) {
     case 'metrics':
       metrics.value = { ttfaMs: evt.ttfaMs, toolMs: evt.toolMs, totalMs: evt.totalMs }
       break
+    case 'stage':
+      stage.value = {
+        stage: evt.stage,
+        index: evt.index,
+        total: evt.total,
+        label: evt.label,
+        labelEn: evt.labelEn,
+        reason: evt.reason,
+      }
+      break
   }
+}
+
+/** 供 store/页面直接写入阶段（接口返回值里也带 stage） */
+function setStage(next: InterviewStage | null | undefined) {
+  if (!next) return
+  stage.value = next
 }
 
 /** 建立事件流连接（重复调用会先断开旧的） */
@@ -137,10 +161,13 @@ export function useInterviewEvents() {
     metrics,
     activeTool,
     lastEmotion,
+    stage,
     connected,
     pushWidget,
     removeWidget,
+    removeWidgetsOfType,
     clearWidgets,
+    setStage,
     connect,
     disconnect,
   }

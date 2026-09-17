@@ -17,6 +17,7 @@ const links = computed(() => {
     { name: 'chat', to: '/chat', label: t('nav.chat') },
     { name: 'code', to: '/code', label: t('nav.codePractice') },
     { name: 'history', to: '/history', label: t('nav.history') },
+    { name: 'metrics', to: '/metrics', label: t('nav.metrics') },
   ]
   if (userStore.isAdmin) {
     list.push({ name: 'admin', to: '/admin', label: t('nav.admin') })

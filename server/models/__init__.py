@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from typing import Optional
 from sqlmodel import SQLModel, Field
@@ -62,6 +61,9 @@ class Interview(SQLModel, table=True):
     duration: int = 30
     style: str = "温和"
     status: str = "进行中"
+    # 面试流程状态机阶段（见 server/services/interview_stage.py）
+    stage: str = "opening"
+    stage_updated_at: Optional[datetime] = None
     started_at: datetime = Field(default_factory=datetime.utcnow)
     ended_at: Optional[datetime] = None
 
@@ -303,3 +305,37 @@ class InterviewAvatarSession(SQLModel, table=True):
     token: str = Field(unique=True, index=True)
     expires_at: datetime
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class InterviewMetric(SQLModel, table=True):
+    """面试具身链路实测指标（用于 /metrics 页面展示真实实测数据）。
+
+    kind: ttfa(首字延迟) | tool(单次工具耗时) | e2e(端到端) | interrupt(打断延迟)
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    interview_id: int = Field(foreign_key="interview.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    kind: str = Field(index=True)
+    name: str = ""
+    value_ms: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class UserWeaknessProfile(SQLModel, table=True):
+    """跨会话候选人弱点画像：每场面试报告生成后聚合，供下一场面试 prompt 注入。
+
+    category: knowledge(知识点) | expression(表达) | logic(逻辑) | jobfit(岗位匹配)
+    同一 (user_id, position, category, topic) 累加 hit_count，用于识别"反复出现"的弱点。
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    position: str = Field(default="", index=True)
+    category: str = "knowledge"
+    topic: str = ""
+    hit_count: int = 1
+    severity: float = 0
+    latest_score: float = 0
+    evidence: str = ""
+    last_interview_id: Optional[int] = Field(default=None, foreign_key="interview.id")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

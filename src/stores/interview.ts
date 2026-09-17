@@ -6,8 +6,11 @@ import type {
   InterviewConfig,
   AIResponse,
   InterviewProblem,
+  InterviewStage,
+  InterviewChoice,
 } from '@/types'
 import * as interviewApi from '@/api/interview'
+import { useInterviewEvents } from '@/composables/useInterviewEvents'
 
 export const useInterviewStore = defineStore('interview', () => {
   const state = ref<InterviewState>('idle')
@@ -20,6 +23,12 @@ export const useInterviewStore = defineStore('interview', () => {
   const startTime = ref<number | null>(null)
   const currentProblem = ref<InterviewProblem | null>(null)
   const lastJudgeResult = ref<any>(null)
+  /** 面试流程状态机阶段（后端 stage 事件 / 接口返回值同步） */
+  const stage = ref<InterviewStage | null>(null)
+  /** 当前待点选的交互控件选项（picker widget） */
+  const choices = ref<InterviewChoice[]>([])
+  /** 客户端侧实测指标（如打断延迟），供 /metrics 页面查看 */
+  const lastInterruptMs = ref<number | null>(null)
 
   // 响应式时钟：remainingTime 依赖它才能真正随时间变化
   // （直接读 Date.now() 不是响应式依赖，computed 永不重算，会导致倒计时静止）
@@ -78,6 +87,9 @@ export const useInterviewStore = defineStore('interview', () => {
     startTime.value = null
     currentProblem.value = null
     lastJudgeResult.value = null
+    stage.value = null
+    choices.value = []
+    lastInterruptMs.value = null
   }
 
   async function start(cfg: InterviewConfig) {
@@ -136,7 +148,16 @@ export const useInterviewStore = defineStore('interview', () => {
     }
   }
 
+  /** 同步状态机阶段（接口返回值与 SSE stage 事件都会调到这里） */
+  function applyStage(next?: InterviewStage | null) {
+    if (!next) return
+    stage.value = next
+    useInterviewEvents().setStage(next)
+  }
+
   function handleAIResponse(res: AIResponse) {
+    applyStage(res.stage)
+    choices.value = res.choices || []
     switch (res.action) {
       case 'ask':
       case 'next_question':
@@ -156,11 +177,57 @@ export const useInterviewStore = defineStore('interview', () => {
         currentProblem.value = res.problem || null
         state.value = 'waiting_answer'
         break
+      case 'choices':
+        // 面试官给出可点选项，等待候选人点选（点选后走 /command 直达，不经 LLM）
+        currentProblem.value = null
+        state.value = 'waiting_answer'
+        break
       case 'end':
         stopTicker()
         state.value = 'generating_report'
         currentProblem.value = null
         break
+      default:
+        // 未知 action（如后端新增类型）不应让页面卡在"分析中"
+        state.value = 'waiting_answer'
+        break
+    }
+  }
+
+  /** 交互控件点选直达：不经过 LLM 解析 */
+  async function selectChoice(choice: InterviewChoice) {
+    if (!interviewId.value || !choice) return
+    state.value = 'analyzing'
+    choices.value = []
+    try {
+      const res = await interviewApi.sendCommand(
+        interviewId.value,
+        choice.intent,
+        choice.label,
+      )
+      applyStage(res.stage)
+      if (res.content) addMessage('interviewer', res.content)
+      if (res.problem) currentProblem.value = res.problem
+      if (res.kind === 'report') {
+        stopTicker()
+        state.value = 'generating_report'
+      } else {
+        state.value = 'waiting_answer'
+      }
+    } catch (e: any) {
+      state.value = 'error'
+      errorMsg.value = e.message
+    }
+  }
+
+  /** 上报客户端侧实测指标（打断延迟） */
+  async function reportInterrupt(ms: number) {
+    lastInterruptMs.value = ms
+    if (!interviewId.value) return
+    try {
+      await interviewApi.reportMetric(interviewId.value, ms)
+    } catch (e) {
+      console.warn('[Interview] 打断延迟上报失败:', e)
     }
   }
 
@@ -192,6 +259,9 @@ export const useInterviewStore = defineStore('interview', () => {
     startTime,
     currentProblem,
     lastJudgeResult,
+    stage,
+    choices,
+    lastInterruptMs,
     isRunning,
     remainingTime,
     addMessage,
@@ -199,6 +269,9 @@ export const useInterviewStore = defineStore('interview', () => {
     start,
     submitAnswer,
     submitCode,
+    applyStage,
+    selectChoice,
+    reportInterrupt,
     endInterview,
     setState,
   }

@@ -9,6 +9,7 @@
 - 每次调用自行开启 `Session(engine)`，避免复用流式期间可能已关闭的会话。
 """
 import json
+import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -174,7 +175,93 @@ TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "offer_choices",
+            "description": (
+                "给候选人一组可点选的选项（如换题目/跳过此题/看提示/进入算法题/结束面试）。"
+                "候选人点选后系统直接执行对应动作，不需要你再解析他们的选择。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "选项组标题，如「接下来你想…」"},
+                    "options": {
+                        "type": "array",
+                        "description": "2-4 个选项",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "label": {"type": "string", "description": "选项文案"},
+                                "intent": {
+                                    "type": "string",
+                                    "enum": [
+                                        "skip_question",
+                                        "hint",
+                                        "start_algorithm",
+                                        "end_interview",
+                                    ],
+                                    "description": "点选后系统执行的确定性动作",
+                                },
+                            },
+                            "required": ["label", "intent"],
+                        },
+                    },
+                },
+                "required": ["options"],
+            },
+        },
+    },
 ]
+
+
+# 交互控件允许的确定性意图（与前端 PickerWidget / /command 端点一一对应）
+CHOICE_INTENTS: tuple[str, ...] = (
+    "skip_question",
+    "hint",
+    "start_algorithm",
+    "end_interview",
+)
+
+
+def build_choices_widget(title: str, options: list[dict], widget_id: str = "") -> dict:
+    """构造交互控件（Picker）Widget 载荷。
+
+    工具、文字路径路由、/command 端点共用同一份结构，避免三处各写一遍。
+    """
+    normalized: list[dict] = []
+    for opt in options or []:
+        if not isinstance(opt, dict):
+            continue
+        label = str(opt.get("label") or "").strip()
+        intent = str(opt.get("intent") or "").strip()
+        if not label or intent not in CHOICE_INTENTS:
+            continue
+        normalized.append({"label": label, "intent": intent, "value": intent})
+    if not normalized:
+        return {}
+    return {
+        "type": "picker",
+        "id": widget_id or f"picker-{uuid.uuid4().hex[:8]}",
+        "data": {"title": title or "请选择", "options": normalized},
+        "ttl": 180000,
+    }
+
+
+async def all_tool_schemas() -> list[dict]:
+    """内置工具 + 已启用的 MCP 工具，供 LLM 一次性看到全部可调用能力。
+
+    MCP 不可用（未配置 / 子进程启动失败）时静默退化为内置工具，不影响面试主线。
+    """
+    schemas = list(TOOL_SCHEMAS)
+    try:
+        from server.services.mcp_service import list_openai_tools
+
+        schemas.extend(await list_openai_tools())
+    except Exception as e:
+        print(f"[Interview Tools] MCP tool discovery failed: {e}")
+    return schemas
 
 
 # ---------- 内部工具函数 ----------
@@ -353,6 +440,11 @@ async def _tool_pick_algorithm_problem(session: Session, ctx: ToolContext, args:
     formatted = format_problem_for_interview(problem)
     speak = f"题目《{problem.title}》（{problem.difficulty}）：{problem.description[:300]}"
 
+    if interview:
+        from server.services.interview_stage import STAGE_ALGORITHM, advance_stage
+
+        advance_stage(session, interview, STAGE_ALGORITHM, reason="tool:pick_algorithm_problem")
+
     return {
         "ok": True,
         "speak": speak,
@@ -414,6 +506,12 @@ async def _tool_run_code(session: Session, ctx: ToolContext, args: dict) -> dict
         failed = next((c for c in result.cases if not c.passed), None)
         if failed:
             speak += f"\n首个失败用例：输入 {failed.input}，期望 {failed.expected}，实际 {failed.actual}"
+
+    interview = _get_interview(session, ctx)
+    if interview:
+        from server.services.interview_stage import STAGE_JUDGE, advance_stage
+
+        advance_stage(session, interview, STAGE_JUDGE, reason="tool:run_code")
 
     return {
         "ok": True,
@@ -492,15 +590,18 @@ async def _tool_get_interview_progress(session: Session, ctx: ToolContext, args:
         ).all()
     )
     from server.services.interview_service import _check_remaining_time
+    from server.services.interview_stage import stage_payload
 
     remaining = _check_remaining_time(interview)
     minutes = max(0, remaining // 60)
+    stage = stage_payload(interview.stage)
 
     return {
         "ok": True,
-        "speak": f"当前已提问 {asked} 轮，剩余约 {minutes} 分钟。",
+        "speak": f"当前处于「{stage['label']}」阶段（第 {stage['index']}/{stage['total']} 步），"
+        f"已提问 {asked} 轮，剩余约 {minutes} 分钟。",
         "widget": None,
-        "data": {"asked": asked, "remainingSeconds": remaining},
+        "data": {"asked": asked, "remainingSeconds": remaining, "stage": stage},
     }
 
 
@@ -565,6 +666,23 @@ async def _tool_play_action(session: Session, ctx: ToolContext, args: dict) -> d
     }
 
 
+async def _tool_offer_choices(session: Session, ctx: ToolContext, args: dict) -> dict:
+    """下发交互控件（Picker）：候选人点选后由 /command 端点直接执行，不经过 LLM。"""
+    title = str(args.get("title") or "").strip()
+    options = args.get("options") or []
+    widget = build_choices_widget(title, options if isinstance(options, list) else [])
+    if not widget:
+        return {"ok": False, "speak": "选项无效，请改为直接提问。", "widget": None, "data": {}}
+
+    labels = "、".join(opt["label"] for opt in widget["data"]["options"])
+    return {
+        "ok": True,
+        "speak": f"已向候选人展示可点选项：{labels}。等待候选人点选，不要重复念出选项。",
+        "widget": widget,
+        "data": {"choices": widget["data"]["options"]},
+    }
+
+
 _DISPATCH: dict[str, Any] = {
     "get_job_description": _tool_get_job_description,
     "analyze_resume": _tool_analyze_resume,
@@ -577,7 +695,38 @@ _DISPATCH: dict[str, Any] = {
     "generate_report": _tool_generate_report,
     "set_emotion": _tool_set_emotion,
     "play_action": _tool_play_action,
+    "offer_choices": _tool_offer_choices,
 }
+
+
+async def _execute_mcp_tool(name: str, args: dict) -> dict:
+    """把 `mcp_*` 工具转发到 MCP server（外部可插拔能力，见 docs/MCP接入方案.md）。"""
+    try:
+        from server.services.mcp_service import call_openai_tool
+
+        result = await call_openai_tool(name, args or {})
+    except Exception as e:
+        print(f"[Interview Tools] MCP {name} failed: {e}")
+        return {
+            "ok": False,
+            "speak": "外部工具暂不可用，请用你自己的判断继续提问。",
+            "widget": None,
+            "data": {"source": "mcp"},
+        }
+
+    if not result.get("ok"):
+        return {
+            "ok": False,
+            "speak": str(result.get("text") or "外部工具调用失败。"),
+            "widget": None,
+            "data": {"source": "mcp"},
+        }
+    return {
+        "ok": True,
+        "speak": str(result.get("text") or "")[:4000],
+        "widget": None,
+        "data": {"source": "mcp"},
+    }
 
 
 async def execute_tool(name: str, args: dict, ctx: ToolContext) -> dict:
@@ -589,6 +738,8 @@ async def execute_tool(name: str, args: dict, ctx: ToolContext) -> dict:
 
     handler = _DISPATCH.get(name)
     if handler is None:
+        if name.startswith("mcp_"):
+            return await _execute_mcp_tool(name, args or {})
         return {"ok": False, "speak": f"未知工具：{name}", "widget": None, "data": {}}
 
     try:

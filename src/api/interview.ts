@@ -3,7 +3,10 @@ import type {
   InterviewConfig,
   AIResponse,
   InterviewRecord,
+  InterviewProblem,
+  InterviewStage,
   BrainConfig,
+  ChoiceIntent,
 } from '@/types'
 
 export function startInterview(
@@ -63,4 +66,36 @@ export function submitInterviewCode(
   data: { problemId: number; language: string; code: string },
 ): Promise<{ judgeResult: InterviewJudgeResult; nextQuestion: AIResponse }> {
   return client.post(`/interview/${interviewId}/submit-code`, data)
+}
+
+/** 交互控件（Picker）点选结果 */
+export interface CommandResult {
+  kind: 'question' | 'hint' | 'problem' | 'report'
+  content?: string
+  action?: string
+  reasoning?: string
+  problem?: InterviewProblem
+  interviewId?: number
+  stage?: InterviewStage
+}
+
+/**
+ * 交互控件点选直达：确定性动作（换题 / 看提示 / 进入算法题 / 结束面试）
+ * 由后端直接执行，不经过 LLM 解析。
+ */
+export function sendCommand(
+  interviewId: number,
+  intent: ChoiceIntent,
+  label = '',
+): Promise<CommandResult> {
+  return client.post(`/interview/${interviewId}/command`, { intent, label })
+}
+
+/** 上报客户端实测指标（打断延迟） */
+export function reportMetric(
+  interviewId: number,
+  valueMs: number,
+  kind = 'interrupt',
+): Promise<{ ok: boolean }> {
+  return client.post(`/metrics/interview/${interviewId}`, { kind, valueMs })
 }

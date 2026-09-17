@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
 import { getInterviewHistory } from '@/api/interview'
+import { getProfileSummary } from '@/api/profile'
+import type { ProfileSummary } from '@/types'
 import { shareContent, detectHost } from '@/utils/bridge'
 
 const { t } = useI18n()
@@ -18,10 +20,25 @@ const stats = ref({
 })
 const loadingStats = ref(true)
 
+/** 跨会话面试画像（弱点记忆） */
+const profile = ref<ProfileSummary | null>(null)
+const loadingProfile = ref(true)
+
 onMounted(async () => {
   await userStore.fetchMe()
-  await fetchStats()
+  await Promise.all([fetchStats(), fetchProfile()])
 })
+
+async function fetchProfile() {
+  loadingProfile.value = true
+  try {
+    profile.value = await getProfileSummary(6)
+  } catch {
+    // 画像属增强信息，失败静默
+  } finally {
+    loadingProfile.value = false
+  }
+}
 
 async function fetchStats() {
   loadingStats.value = true
@@ -136,6 +153,63 @@ const menuSections = computed(() => [
 
     <!-- Menu Sections -->
     <div class="px-4 py-4 space-y-4">
+      <!-- 跨会话面试画像：反复暴露的薄弱点会在下一场面试被针对性追问 -->
+      <div>
+        <h3 class="mb-2 px-1 text-xs font-medium text-gray-500">
+          {{ t('profile.weakness.title') }}
+        </h3>
+        <div class="rounded-xl bg-white p-4 shadow-sm">
+          <p class="text-xs text-gray-400">{{ t('profile.weakness.subtitle') }}</p>
+
+          <div v-if="loadingProfile" class="mt-3 space-y-2">
+            <div class="h-4 w-2/3 animate-pulse rounded bg-gray-100" />
+            <div class="h-4 w-1/2 animate-pulse rounded bg-gray-100" />
+          </div>
+
+          <template v-else-if="profile && profile.reportCount > 0">
+            <div class="mt-3 flex items-center gap-4">
+              <div>
+                <p class="text-lg font-bold text-gray-800">{{ profile.reportCount }}</p>
+                <p class="text-[11px] text-gray-400">{{ t('profile.weakness.reportCount') }}</p>
+              </div>
+              <div>
+                <p class="text-lg font-bold text-gray-800">
+                  {{ profile.avgScore ?? '-' }}
+                </p>
+                <p class="text-[11px] text-gray-400">{{ t('profile.weakness.avgScore') }}</p>
+              </div>
+              <div>
+                <p class="text-lg font-bold text-gray-800">{{ profile.weaknessCount }}</p>
+                <p class="text-[11px] text-gray-400">{{ t('profile.weakness.weakCount') }}</p>
+              </div>
+            </div>
+
+            <ul v-if="profile.weaknesses.length" class="mt-3 space-y-2">
+              <li
+                v-for="item in profile.weaknesses"
+                :key="item.category + item.topic"
+                class="rounded-lg border border-gray-100 bg-gray-50/60 px-3 py-2"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <p class="truncate text-xs font-medium text-gray-700">{{ item.topic }}</p>
+                  <span class="shrink-0 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
+                    {{ item.categoryLabel }} ·
+                    {{ t('profile.weakness.hitTimes', { count: item.hitCount }) }}
+                  </span>
+                </div>
+                <p class="mt-0.5 text-[11px] text-gray-400">
+                  {{ t('profile.weakness.lastScore') }} {{ item.latestScore }}
+                </p>
+              </li>
+            </ul>
+          </template>
+
+          <p v-else class="mt-3 text-xs text-gray-400">
+            {{ t('profile.weakness.noData') }}
+          </p>
+        </div>
+      </div>
+
       <div v-for="section in menuSections" :key="section.title">
         <h3 class="mb-2 px-1 text-xs font-medium text-gray-500">{{ section.title }}</h3>
         <div class="overflow-hidden rounded-xl bg-white shadow-sm">

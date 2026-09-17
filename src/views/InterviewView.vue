@@ -16,12 +16,30 @@ import { renderMarkdown } from '@/utils/markdown'
 import type { ASRResult, BrainConfig, RawWidgetEvent } from '@/types'
 import type { AvatarProvider } from '@/providers/avatarProvider'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
 const store = useInterviewStore()
 const { initAvatar, getProvider, destroyAvatar, isDigital } = useAvatar()
-const { metrics, activeTool, lastEmotion, connected: eventsConnected, connect: connectEvents, disconnect: disconnectEvents, clearWidgets } = useInterviewEvents()
+const { metrics, activeTool, lastEmotion, stage: interviewStage, connected: eventsConnected, connect: connectEvents, disconnect: disconnectEvents, clearWidgets } = useInterviewEvents()
 const { isMobile, isLandscape } = useDevice()
+
+/** 面试流程状态机的步骤条（与后端 interview_stage.PROGRESS_STAGES 顺序一致） */
+const STAGE_STEPS = [
+  { stage: 'opening', zh: '开场', en: 'Opening' },
+  { stage: 'ask', zh: '提问', en: 'Question' },
+  { stage: 'followup', zh: '追问', en: 'Follow-up' },
+  { stage: 'algorithm', zh: '算法题', en: 'Coding' },
+  { stage: 'judge', zh: '判题', en: 'Review' },
+  { stage: 'closing', zh: '收尾', en: 'Closing' },
+  { stage: 'report', zh: '报告', en: 'Report' },
+] as const
+
+const currentStageIndex = computed(
+  () => interviewStage.value?.index ?? store.stage?.index ?? 0,
+)
+const stageSteps = computed(() =>
+  STAGE_STEPS.map((s) => ({ stage: s.stage, label: locale.value === 'zh' ? s.zh : s.en })),
+)
 
 const chatPanel = ref<HTMLElement | null>(null)
 const textInput = ref('')
@@ -331,9 +349,11 @@ async function handleEnd() {
 
 async function handleInterrupt() {
   const provider = getProvider()
-  if (provider) {
-    await provider.interrupt()
-  }
+  if (!provider) return
+  const startedAt = performance.now()
+  await provider.interrupt()
+  // 打断延迟实测：用户开口 → 具身交互智能体停嘴（上报后可在 /metrics 查看）
+  void store.reportInterrupt(Math.round(performance.now() - startedAt))
 }
 
 function scrollToBottom() {
@@ -393,6 +413,28 @@ function scrollToBottom() {
         >
           {{ isEnding ? t('interview.ending') : t('interview.endInterview') }}
         </button>
+      </div>
+    </div>
+
+    <!-- 面试流程状态机：阶段由后端 stage 事件与接口返回值共同驱动 -->
+    <div
+      v-if="currentStageIndex > 0"
+      class="flex items-center gap-1.5 overflow-x-auto border-b bg-white px-4 py-2"
+    >
+      <span class="mr-1 hidden text-[11px] font-medium text-gray-400 md:inline">
+        {{ t('interview.stageTitle') }}
+      </span>
+      <div
+        v-for="(step, idx) in stageSteps"
+        :key="step.stage"
+        class="flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px]"
+        :class="idx + 1 <= currentStageIndex ? 'bg-primary-50 font-medium text-primary-700' : 'bg-gray-50 text-gray-400'"
+      >
+        <span
+          class="inline-block h-1.5 w-1.5 rounded-full"
+          :class="idx + 1 <= currentStageIndex ? 'bg-primary-500' : 'bg-gray-300'"
+        />
+        {{ step.label }}
       </div>
     </div>
 
@@ -493,6 +535,22 @@ function scrollToBottom() {
             <span class="animate-pulse">🎤 {{ t('interview.listening') }} </span>
             <span v-if="partialText">{{ partialText }}</span>
             <span v-else-if="asrResults">{{ asrResults }}</span>
+          </div>
+
+          <!-- 交互控件兜底：事件流未连接时也能点选（点选直达状态机，不经 LLM） -->
+          <div
+            v-if="store.choices.length"
+            class="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-primary-100 bg-primary-50/60 p-2"
+          >
+            <button
+              v-for="opt in store.choices"
+              :key="opt.intent + opt.label"
+              class="rounded-lg border border-primary-200 bg-white px-3 py-1.5 text-xs font-medium text-primary-700 transition hover:bg-primary-50 disabled:opacity-50"
+              :disabled="store.state === 'analyzing'"
+              @click="store.selectChoice(opt)"
+            >
+              {{ opt.label }}
+            </button>
           </div>
 
           <div class="flex flex-wrap gap-2">

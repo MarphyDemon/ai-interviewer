@@ -33,6 +33,8 @@ def _run_migrations():
         ("user", "notification_settings", "TEXT DEFAULT '{}'"),
     ]
     migrations_postgres = [
+        ("interview", "stage", "VARCHAR DEFAULT 'opening'"),
+        ("interview", "stage_updated_at", "TIMESTAMP"),
         ("avatarproviderconfig", "avatar_image", "VARCHAR DEFAULT ''"),
         ("user", "preferred_avatar_config_id", "INTEGER"),
         ("user", "role", "VARCHAR DEFAULT 'user'"),
@@ -154,7 +156,6 @@ def _seed_knowledge_versions():
             ).first()
             if existing:
                 continue
-            import json as _json
             ver = KnowledgeVersion(
                 doc_id=doc.id,
                 version_number=1,

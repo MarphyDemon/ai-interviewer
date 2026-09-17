@@ -100,7 +100,16 @@ export interface ChatMessage {
   timestamp: number
 }
 
-export type AIAction = 'ask' | 'followup' | 'next_question' | 'algorithm' | 'end'
+export type AIAction = 'ask' | 'followup' | 'next_question' | 'algorithm' | 'choices' | 'end'
+
+/** 交互控件（Picker）的确定性意图：点选后系统直接执行，不经过 LLM */
+export type ChoiceIntent = 'skip_question' | 'hint' | 'start_algorithm' | 'end_interview'
+
+export interface InterviewChoice {
+  label: string
+  intent: ChoiceIntent
+  value?: string
+}
 
 export interface InterviewProblem {
   id: number
@@ -118,6 +127,8 @@ export interface AIResponse {
   content: string
   reasoning?: string
   problem?: InterviewProblem
+  choices?: InterviewChoice[]
+  stage?: InterviewStage
 }
 
 export interface AvatarConfig {
@@ -259,6 +270,8 @@ export type InterviewWidgetType =
   | 'judge_result'
   | 'interview_report'
   | 'score'
+  /** 交互控件：可点选项，点选后直达状态机（不经 LLM） */
+  | 'picker'
 
 export interface InterviewWidget {
   type: InterviewWidgetType
@@ -304,6 +317,28 @@ export interface InterviewEmotionEvent {
   reason: string
 }
 
+/** 面试流程状态机阶段（与后端 interview_stage.py 一致） */
+export type InterviewStageName =
+  | 'opening'
+  | 'ask'
+  | 'followup'
+  | 'algorithm'
+  | 'judge'
+  | 'closing'
+  | 'report'
+  | 'finished'
+
+export interface InterviewStage {
+  stage: InterviewStageName
+  /** 步骤条序号（1-based） */
+  index: number
+  /** 步骤总数 */
+  total: number
+  label: string
+  labelEn: string
+  reason?: string
+}
+
 /** 面试事件流推送的事件联合类型 */
 export type InterviewEvent =
   | { type: 'widget'; payload: InterviewWidget }
@@ -311,6 +346,64 @@ export type InterviewEvent =
   | ({ type: 'tool_result' } & InterviewToolEvent)
   | ({ type: 'emotion' } & InterviewEmotionEvent)
   | ({ type: 'metrics' } & InterviewMetrics)
+  | ({ type: 'stage' } & InterviewStage)
+
+/** 实测指标查看界面（/metrics） */
+export interface MetricStats {
+  avg: number | null
+  p50: number | null
+  p95: number | null
+  max: number | null
+  count: number
+}
+
+export interface ToolMetricRow extends MetricStats {
+  name: string
+}
+
+export interface MetricsSummary {
+  days: number
+  interviewCount: number
+  metricCount: number
+  kinds: Record<'ttfa' | 'tool' | 'e2e' | 'interrupt', MetricStats>
+  kindLabels: Record<string, string>
+  toolTop: ToolMetricRow[]
+}
+
+export interface InterviewMetricRow {
+  interviewId: number
+  position: string
+  difficulty: string
+  stage: string
+  status: string
+  startedAt: string | null
+  ttfaMs: number | null
+  toolMs: number | null
+  e2eMs: number | null
+  interruptMs: number | null
+  toolCalls: number
+}
+
+/** 跨会话候选人画像 */
+export interface WeaknessItem {
+  topic: string
+  category: string
+  categoryLabel: string
+  hitCount: number
+  severity: number
+  latestScore: number
+  evidence: string
+  position: string
+  lastInterviewId: number | null
+}
+
+export interface ProfileSummary {
+  reportCount: number
+  avgScore: number | null
+  weaknessCount: number
+  weaknesses: WeaknessItem[]
+  categoryStats: { category: string; label: string; count: number }[]
+}
 
 /** 具身交互智能体 SDK 下发的原始 Widget 事件（proxyWidget 回调入参） */
 export interface RawWidgetEvent {

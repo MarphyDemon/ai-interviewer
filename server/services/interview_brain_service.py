@@ -97,6 +97,8 @@ def build_interviewer_prompt(
     resume_text: str = "",
     jd_text: str = "",
     remaining_seconds: Optional[int] = None,
+    stage: str = "",
+    profile: str = "",
 ) -> str:
     """构建面试官 system prompt（口播友好版）。
 
@@ -136,6 +138,8 @@ def build_interviewer_prompt(
 - 对某段回答想给出量化评价时 → `score_answer`
 - 需要核对知识点时 → `retrieve_knowledge`
 - 表达对回答的态度时 → `set_emotion`（可附带 `ka` 动作）
+- 需要候选人在几个选项里选一个时（开场选方向、连续答不上来、是否进入算法题）→ `offer_choices`；
+  候选人点选后系统直接执行对应动作，不需要你再解析他们的选择
 
 调用工具前不要预告细节，用一句话带过即可；工具返回后基于结果继续对话。
 **不要每轮都调用工具**，也不要为了展示能力而调用无关工具。
@@ -154,6 +158,14 @@ def build_interviewer_prompt(
                 f"\n## 时间提示\n仅剩约 {remaining_seconds // 60} 分钟，"
                 "请开始收束话题，不要再开启新的大题。\n"
             )
+    if stage:
+        from server.services.interview_stage import stage_hint
+
+        hint = stage_hint(stage)
+        if hint:
+            prompt += f"\n## 当前阶段\n{hint}\n"
+    if profile:
+        prompt += f"\n{profile}\n"
     return prompt
 
 
@@ -214,8 +226,21 @@ def _build_context(session: Session, interview: Interview, knowledge: str) -> li
         resume_text=resume_text,
         jd_text=jd_text,
         remaining_seconds=_remaining_seconds(interview),
+        stage=interview.stage,
+        profile=_build_profile_text(session, interview),
     )
     return [{"role": "system", "content": system_prompt}] + _load_messages(session, interview)
+
+
+def _build_profile_text(session: Session, interview: Interview) -> str:
+    """跨会话弱点画像（失败时静默降级，不能影响面试主线）。"""
+    try:
+        from server.services.profile_service import build_profile_context
+
+        return build_profile_context(session, interview.user_id, interview.position)
+    except Exception as e:
+        print(f"[Interview Brain] profile context failed: {e}")
+        return ""
 
 
 # ---------- 流式生成 ----------
@@ -292,7 +317,7 @@ async def generate_interview_stream(
     from server.services.common import get_active_llm_config
     from server.services.interview_event_bus import publish
     from server.services.interview_service import save_message
-    from server.services.interview_tools import TOOL_SCHEMAS, ToolContext, execute_tool
+    from server.services.interview_tools import ToolContext, all_tool_schemas, execute_tool
 
     started_at = time.monotonic()
     chunk_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -314,12 +339,26 @@ async def generate_interview_stream(
         cfg = get_active_llm_config(db)
         ctx = ToolContext(interview_id=interview_id, user_id=interview.user_id or 0)
 
+        # 状态机：语音路径首轮即从「开场」进入「提问」（后续阶段由工具推进）
+        from server.services.interview_stage import (
+            STAGE_ASK,
+            STAGE_OPENING,
+            advance_stage,
+            normalize_stage,
+        )
+
+        if normalize_stage(interview.stage) == STAGE_OPENING:
+            advance_stage(db, interview, STAGE_ASK, reason="first_turn")
+
     client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
+    # 内置工具 + MCP 工具（一次性发现，循环内复用）
+    tool_schemas = await all_tool_schemas()
 
     full_response = ""
     pending_ka: list[str] = []          # 待注入文本的 KA 动作（SSML 开启时生效）
     first_token_at: Optional[float] = None
     tool_ms_total = 0
+    tool_times: list[tuple[str, int]] = []   # 单次工具耗时（工具名, 毫秒），用于指标落库
 
     def emit(text: str) -> str:
         """输出前处理：SSML 注入开关打开时，把待执行的 KA 动作前缀到文本。"""
@@ -340,7 +379,7 @@ async def generate_interview_stream(
             stream = await client.chat.completions.create(
                 model=cfg.model,
                 messages=messages,
-                tools=TOOL_SCHEMAS,
+                tools=tool_schemas,
                 tool_choice="auto",
                 stream=True,
             )
@@ -407,6 +446,7 @@ async def generate_interview_stream(
                 result = await execute_tool(name, args, ctx)
                 cost_ms = int((time.monotonic() - t0) * 1000)
                 tool_ms_total += cost_ms
+                tool_times.append((name, cost_ms))
 
                 publish(
                     interview_id,
@@ -449,15 +489,30 @@ async def generate_interview_stream(
         yield "data: [DONE]\n\n"
 
         # 时延埋点：首字延迟 / 工具总耗时 / 端到端耗时
+        ttfa_ms = int((first_token_at - started_at) * 1000) if first_token_at else None
+        total_ms = int((time.monotonic() - started_at) * 1000)
         publish(
             interview_id,
             {
                 "type": "metrics",
-                "ttfaMs": int((first_token_at - started_at) * 1000) if first_token_at else None,
+                "ttfaMs": ttfa_ms,
                 "toolMs": tool_ms_total,
-                "totalMs": int((time.monotonic() - started_at) * 1000),
+                "totalMs": total_ms,
             },
         )
+
+        # 指标落库（供 /metrics 页面展示真实实测值）
+        try:
+            from server.services.metrics_service import record_metrics
+
+            items = [{"kind": "e2e", "valueMs": total_ms}]
+            if ttfa_ms is not None:
+                items.append({"kind": "ttfa", "valueMs": ttfa_ms})
+            items.extend({"kind": "tool", "valueMs": ms, "name": name} for name, ms in tool_times)
+            with Session(engine) as db:
+                record_metrics(db, interview_id, interview.user_id or 0, items)
+        except Exception as e:
+            print(f"[Interview Brain] metrics persist failed: {e}")
 
         # 落库面试官回复（供多轮记忆与报告生成使用）
         if full_response:
@@ -482,7 +537,7 @@ async def generate_interview_non_stream(
     from server.services.common import get_active_llm_config
     from server.services.interview_event_bus import publish
     from server.services.interview_service import save_message
-    from server.services.interview_tools import TOOL_SCHEMAS, ToolContext, execute_tool
+    from server.services.interview_tools import ToolContext, all_tool_schemas, execute_tool
 
     with Session(engine) as db:
         interview = db.get(Interview, interview_id)
@@ -500,7 +555,11 @@ async def generate_interview_non_stream(
     client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
 
     response = await client.chat.completions.create(
-        model=cfg.model, messages=messages, tools=TOOL_SCHEMAS, tool_choice="auto", stream=False
+        model=cfg.model,
+        messages=messages,
+        tools=await all_tool_schemas(),
+        tool_choice="auto",
+        stream=False,
     )
     choice = response.choices[0]
     full_response = choice.message.content or ""

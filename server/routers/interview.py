@@ -19,7 +19,16 @@ from server.services.interview_service import (
     save_message,
     pick_algorithm_problem,
     format_problem_for_interview,
+    normalize_difficulty,
+    _load_conversation,
 )
+from server.services.interview_stage import (
+    STAGE_ALGORITHM,
+    advance_by_action,
+    advance_stage,
+    stage_payload,
+)
+from server.services.interview_tools import CHOICE_INTENTS, build_choices_widget
 from server.services.auth_service import get_current_user, verify_user_token
 from server.services.common import get_active_llm_config
 from server.services.judge_service import judge
@@ -45,6 +54,20 @@ class AnswerRequest(BaseModel):
     answer: str
 
 
+class CommandRequest(BaseModel):
+    """交互控件（Picker）点选后的确定性指令。"""
+
+    intent: str
+    label: str = ""
+
+
+def _publish_choices(interview_id: int, choices: list, title: str = "") -> None:
+    """把可点选项下发为 picker widget。"""
+    widget = build_choices_widget(title, choices)
+    if widget:
+        publish(interview_id, {"type": "widget", "payload": widget})
+
+
 @router.post("/start")
 async def start_interview(
     req: StartRequest,
@@ -56,7 +79,8 @@ async def start_interview(
         resume_id=req.resumeId,
         jd_id=req.jdId,
         position=req.position,
-        difficulty=req.difficulty,
+        # 前端传 junior/mid/senior，统一落库为中文难度（初级/中级/高级）
+        difficulty=normalize_difficulty(req.difficulty),
         duration=req.duration,
         style=req.style,
     )
@@ -69,6 +93,9 @@ async def start_interview(
 
     first = await generate_first_question(session, interview, resume, jd=jd, lang=req.lang)
 
+    # 状态机：开场 → 按首个 action 落到「提问 / 算法题」等阶段
+    advance_by_action(session, interview, first.get("action"))
+
     save_message(
         session, interview.id, "interviewer", first.get("content", ""),
         question_index=1, followup_level=0,
@@ -76,6 +103,7 @@ async def start_interview(
 
     response = {
         "interviewId": interview.id,
+        "stage": stage_payload(interview.stage),
         "firstQuestion": {
             "action": first.get("action", "ask"),
             "content": first.get("content", ""),
@@ -88,6 +116,12 @@ async def start_interview(
         problem = pick_algorithm_problem(session, interview.difficulty)
         if problem:
             response["firstQuestion"]["problem"] = format_problem_for_interview(problem)
+
+    # 交互控件：LLM 在开场让候选人做选择时下发可点选项
+    choices = first.get("choices") or []
+    if choices:
+        response["firstQuestion"]["choices"] = choices
+        _publish_choices(interview.id, choices, "请选择")
 
     return response
 
@@ -222,7 +256,14 @@ async def submit_answer(
         "action": result.get("action", "next_question"),
         "content": result.get("content", ""),
         "reasoning": result.get("reasoning", ""),
+        "stage": stage_payload(interview.stage),
     }
+
+    # 交互控件：LLM 决定让候选人做选择时下发可点选项
+    choices = result.get("choices") or []
+    if choices:
+        response["choices"] = choices
+        _publish_choices(interview_id, choices, "请选择")
 
     # 如果下一题是算法题，附带题目详情
     if result.get("action") == "algorithm":
@@ -246,6 +287,102 @@ async def submit_answer(
             )
 
     return response
+
+
+@router.post("/{interview_id}/command")
+async def interview_command(
+    interview_id: int,
+    req: CommandRequest,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """交互控件（Picker）点选直达：确定性动作不经过 LLM 解析。
+
+    支持 skip_question（换题）/ hint（看提示）/ start_algorithm（进入算法题）/ end_interview（结束并出报告）。
+    """
+    interview = session.get(Interview, interview_id)
+    if not interview or interview.user_id != user.id:
+        raise HTTPException(404, "Interview not found")
+
+    intent = (req.intent or "").strip()
+    if intent not in CHOICE_INTENTS:
+        raise HTTPException(400, f"未知指令：{intent}")
+
+    label = (req.label or intent).strip()
+    save_message(session, interview_id, "user", f"（候选人点了「{label}」）")
+
+    if intent == "skip_question":
+        result = await process_answer(session, interview, "候选人选择跳过当前问题，请换一个新的问题。")
+        save_message(session, interview_id, "interviewer", result.get("content", ""))
+        payload = {
+            "kind": "question",
+            "action": result.get("action", "next_question"),
+            "content": result.get("content", ""),
+            "reasoning": result.get("reasoning", ""),
+        }
+        if result.get("action") == "algorithm":
+            problem = pick_algorithm_problem(session, interview.difficulty)
+            if problem:
+                formatted = format_problem_for_interview(problem)
+                payload["problem"] = formatted
+                publish(
+                    interview_id,
+                    {
+                        "type": "widget",
+                        "payload": {
+                            "type": "question_card",
+                            "id": f"problem-{problem.id}",
+                            "data": formatted,
+                            "ttl": 600000,
+                        },
+                    },
+                )
+
+    elif intent == "hint":
+        payload = {"kind": "hint", "content": await _build_hint(session, interview)}
+
+    elif intent == "start_algorithm":
+        problem = pick_algorithm_problem(session, interview.difficulty)
+        if not problem:
+            raise HTTPException(400, "题库中没有可用题目")
+        formatted = format_problem_for_interview(problem)
+        advance_stage(session, interview, STAGE_ALGORITHM, reason="command:start_algorithm")
+        content = f"好的，我们来一道算法题：《{problem.title}》。"
+        save_message(session, interview_id, "interviewer", content)
+        publish(
+            interview_id,
+            {
+                "type": "widget",
+                "payload": {
+                    "type": "question_card",
+                    "id": f"problem-{problem.id}",
+                    "data": formatted,
+                    "ttl": 600000,
+                },
+            },
+        )
+        payload = {"kind": "problem", "content": content, "problem": formatted}
+
+    else:  # end_interview
+        await generate_report(session, interview)
+        payload = {"kind": "report", "interviewId": interview_id}
+
+    payload["stage"] = stage_payload(interview.stage)
+    return payload
+
+
+async def _build_hint(session: Session, interview: Interview) -> str:
+    """给候选人一个不直接透露答案的提示（独立于 LLM 状态机的确定性动作）。"""
+    from server.services.llm_service import llm_chat
+
+    messages = _load_conversation(session, interview.id)
+    last_question = next((m["content"] for m in reversed(messages) if m["role"] == "assistant"), "")
+    prompt = (
+        "候选人在面试中一时答不上来，请给出一个不直接透露答案的提示，"
+        "2 句话以内、口语化、不要输出 Markdown。\n"
+        f"当前题目：{last_question or '（无）'}"
+    )
+    return await llm_chat([{"role": "user", "content": prompt}], session=session)
 
 
 @router.post("/{interview_id}/end")
@@ -338,6 +475,7 @@ async def submit_interview_code(
             "content": next_result.get("content", ""),
             "reasoning": next_result.get("reasoning", ""),
         },
+        "stage": stage_payload(interview.stage),
     }
 
     # 如果下一题又是算法题，附带题目详情
@@ -425,6 +563,7 @@ def _format_interview(i: Interview) -> dict:
         "duration": i.duration,
         "style": i.style,
         "status": i.status,
+        "stage": i.stage,
         "startedAt": i.started_at.isoformat() if i.started_at else None,
         "endedAt": i.ended_at.isoformat() if i.ended_at else None,
     }

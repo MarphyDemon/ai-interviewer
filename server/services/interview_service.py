@@ -3,10 +3,49 @@ import random
 from datetime import datetime
 from typing import Optional
 from sqlmodel import Session, select
-from server.models import Interview, InterviewMessage, Report, Resume, KnowledgeDoc, JobDescription, AlgorithmProblem
+from server.models import Interview, InterviewMessage, Report, Resume, JobDescription, AlgorithmProblem
 from server.services.llm_service import llm_chat
+from server.services import offline_service
 from server.services.rag_service import search
+from server.services.interview_stage import (
+    STAGE_FINISHED,
+    STAGE_REPORT,
+    advance_by_action,
+    advance_stage,
+    stage_hint,
+)
+from server.services.profile_service import build_profile_context, refresh_profile_from_report
 from server.embedding.siliconflow import get_embedding
+
+
+# ---------- 难度词汇归一化 ----------
+# 三套词汇并存：前端 i18n 用 junior/mid/senior；面试报告与题库筛选用 初级/中级/高级；
+# 算法题（AlgorithmProblem.difficulty）用 简单/中等/困难。这里统一收口，避免互相匹配不上。
+_DIFFICULTY_ALIASES = {
+    "junior": "初级",
+    "初级": "初级",
+    "mid": "中级",
+    "中级": "中级",
+    "senior": "高级",
+    "高级": "高级",
+    "简单": "初级",
+    "中等": "中级",
+    "困难": "高级",
+}
+_PROBLEM_DIFFICULTY = {"初级": "简单", "中级": "中等", "高级": "困难"}
+
+
+def normalize_difficulty(value: str) -> str:
+    """把面试难度统一为中文（初级 / 中级 / 高级）。无法识别时原样返回。"""
+    raw = (value or "").strip()
+    if not raw:
+        return "中级"
+    return _DIFFICULTY_ALIASES.get(raw, _DIFFICULTY_ALIASES.get(raw.lower(), raw))
+
+
+def problem_difficulty_of(value: str) -> str:
+    """把面试难度换算为算法题难度词汇（简单 / 中等 / 困难）。无法识别时返回空串（表示不过滤）。"""
+    return _PROBLEM_DIFFICULTY.get(normalize_difficulty(value), "")
 
 
 async def generate_first_question(
@@ -34,6 +73,8 @@ async def generate_first_question(
         resume_text=resume_text,
         jd_text=jd_text,
         lang=lang,
+        stage=interview.stage,
+        profile=build_profile_context(session, interview.user_id, interview.position),
     )
 
     user_prompt = "请开始面试，提出第一个问题。" if lang == "zh" else "Start the interview. Ask the first question."
@@ -74,6 +115,8 @@ async def process_answer(
         style=interview.style,
         knowledge=knowledge_context,
         jd_text=jd_text,
+        stage=interview.stage,
+        profile=build_profile_context(session, interview.user_id, interview.position),
     )
 
     if remaining <= 0:
@@ -88,10 +131,16 @@ async def process_answer(
         json_mode=True,
     )
 
-    return _parse_ai_response(result)
+    parsed = _parse_ai_response(result)
+    # 状态机：按 LLM 返回的 action 推进阶段（choices 等不改变阶段的 action 会被忽略）
+    advance_by_action(session, interview, parsed.get("action"))
+    return parsed
 
 
 async def generate_report(session: Session, interview: Interview) -> Report:
+    # 状态机：进入报告阶段（强制收敛，允许从任意阶段跳入）
+    advance_stage(session, interview, STAGE_REPORT, reason="report", force=True)
+
     messages = _load_conversation(session, interview.id)
     resume = session.get(Resume, interview.resume_id) if interview.resume_id else None
     jd = session.get(JobDescription, interview.jd_id) if interview.jd_id else None
@@ -104,13 +153,13 @@ async def generate_report(session: Session, interview: Interview) -> Report:
     jd_text = jd.content[:3000] if jd else ""
     match_section = ""
     if jd_text:
-        match_section = f"""
+        match_section = """
   "matchScore": 0-100的整数（候选人对该 JD 的整体匹配度）,
-  "matchBreakdown": [{{"requirement": "JD中明确列出的某条要求", "status": "met|partial|gap", "evidence": "依据候选人答题或简历的简短证据"}}],
+  "matchBreakdown": [{"requirement": "JD中明确列出的某条要求", "status": "met|partial|gap", "evidence": "依据候选人答题或简历的简短证据"}],
 """
     match_instruction = ""
     if jd_text:
-        match_instruction = f"""
+        match_instruction = """
 Additional requirement — produce a structured person-job match against the JD:
 - "matchScore": 0-100 integer, overall fit for THIS specific JD.
 - "matchBreakdown": one entry per KEY requirement explicitly listed in the JD. status ∈ met(满足)/partial(部分)/gap(不足). evidence must reference the candidate's answers or resume.
@@ -183,11 +232,24 @@ Job Description (if available):
     session.commit()
     session.refresh(report)
 
+    # 跨会话画像：把本场报告的弱点聚合进用户画像，供下一场面试的 prompt 注入
+    try:
+        refresh_profile_from_report(session, interview, report)
+    except Exception as e:
+        print(f"[Profile] refresh failed: {e}")
+
+    advance_stage(session, interview, STAGE_FINISHED, reason="finished", force=True)
+
     return report
 
 
 async def _retrieve_knowledge(session: Session, position: str, difficulty: str) -> str:
     query_text = f"{position} {difficulty} 面试题"
+    if offline_service.enabled():
+        # 离线规则模式：关键词检索（无向量化）
+        return "\n---\n".join(
+            offline_service.keyword_search(session, query_text, top_k=5, position=position)
+        )
     try:
         embedding = await get_embedding(query_text)
         # 先尝试按 position 过滤，没结果则全库搜索
@@ -210,6 +272,8 @@ def _build_system_prompt(
     resume_text: str = "",
     jd_text: str = "",
     lang: str = "en",
+    stage: str = "",
+    profile: str = "",
 ) -> str:
     if lang == "zh":
         prompt = f"""你是一名{style}风格的面试官，正在面试{position}方向的{difficulty}级别候选人。
@@ -224,13 +288,14 @@ def _build_system_prompt(
 7. 在面试中段（非首题非末题），可适当安排 1-2 道算法/编码题，考察 coding 能力。使用 action="algorithm"
 
 输出格式（严格JSON）：
-{{"action": "ask|followup|next_question|algorithm|end", "content": "你的提问内容", "reasoning": "内部判断"}}
+{{"action": "ask|followup|next_question|algorithm|choices|end", "content": "你的提问内容", "reasoning": "内部判断", "choices": [{{"label": "选项文案", "intent": "skip_question|hint|start_algorithm|end_interview"}}]}}
 
 action 说明：
 - ask: 首次提问
 - followup: 追问（同一题的深入）
 - next_question: 换新题
 - algorithm: 安排一道算法编码题（系统会自动选题，content 写引导语即可）
+- choices: 需要候选人做选择时使用（如开场选择方向、连续答不上来、询问是否进入算法题），把 2~4 个选项放进 choices，候选人点选后系统直接执行，不再经过你
 - end: 面试结束
 """
     else:
@@ -246,13 +311,14 @@ Rules:
 7. In the middle of the interview (not first or last question), you may assign 1-2 algorithm/coding questions to test coding ability. Use action="algorithm".
 
 Output format (strict JSON):
-{{"action": "ask|followup|next_question|algorithm|end", "content": "your question", "reasoning": "internal judgment"}}
+{{"action": "ask|followup|next_question|algorithm|choices|end", "content": "your question", "reasoning": "internal judgment", "choices": [{{"label": "option text", "intent": "skip_question|hint|start_algorithm|end_interview"}}]}}
 
 Action meanings:
 - ask: first question
 - followup: deeper follow-up on the same question
 - next_question: switch to a new question
 - algorithm: assign an algorithm/coding problem (system auto-selects, just write intro in content)
+- choices: when the candidate should pick an option (opening direction, repeated failures, whether to enter a coding round) — put 2-4 options in "choices"; the system executes the selection directly without you
 - end: interview ended
 """
     if jd_text:
@@ -261,6 +327,12 @@ Action meanings:
         prompt += f"\n参考知识素材（可据此出题和判卷）：\n{knowledge}\n"
     if resume_text:
         prompt += f"\n候选人简历：\n{resume_text}\n"
+    if stage:
+        hint = stage_hint(stage)
+        if hint:
+            prompt += f"\n{hint}\n"
+    if profile:
+        prompt += f"\n{profile}\n"
     return prompt
 
 
@@ -313,11 +385,15 @@ def save_message(
 
 
 def pick_algorithm_problem(session: Session, difficulty: str = "") -> Optional[AlgorithmProblem]:
-    """根据难度选取一道算法题（随机，无则返回 None）。"""
+    """根据难度选取一道算法题（随机，无则返回 None）。
+
+    入参可能是面试难度（junior/mid/senior，或历史数据里的中文写法），
+    需先换算成算法题自己的难度词汇（简单/中等/困难），否则永远匹配不上而退化为全库随机。
+    """
     stmt = select(AlgorithmProblem).where(AlgorithmProblem.is_public == True)  # noqa: E712
-    if difficulty:
-        # 尝试匹配难度（简单/中等/困难）
-        stmt = stmt.where(AlgorithmProblem.difficulty == difficulty)
+    problem_difficulty = problem_difficulty_of(difficulty)
+    if problem_difficulty:
+        stmt = stmt.where(AlgorithmProblem.difficulty == problem_difficulty)
     rows = session.exec(stmt).all()
     if not rows:
         # 退而求其次，取全部
