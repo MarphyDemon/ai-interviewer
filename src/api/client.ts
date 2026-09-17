@@ -20,16 +20,24 @@ export async function getToken(url = ''): Promise<string | null> {
   const tokenKey = isAdminUrl ? 'admin_token' : 'user_token'
   const host = detectHost()
 
-  if (host === 'capacitor') {
-    try {
-      const { Preferences } = await import('@capacitor/preferences')
-      const { value } = await Preferences.get({ key: tokenKey })
-      return value
-    } catch {
-      // Fall back to localStorage
+  const read = async (key: string): Promise<string | null> => {
+    if (host === 'capacitor') {
+      try {
+        const { Preferences } = await import('@capacitor/preferences')
+        const { value } = await Preferences.get({ key })
+        if (value) return value
+      } catch {
+        // Fall back to localStorage
+      }
     }
+    return localStorage.getItem(key)
   }
-  return localStorage.getItem(tokenKey)
+
+  const token = await read(tokenKey)
+  if (token) return token
+  // 管理接口：口令 token 缺失时回退到已登录的管理员用户 token（role=admin）
+  if (isAdminUrl) return read('user_token')
+  return null
 }
 
 const client = axios.create({
@@ -46,6 +54,9 @@ client.interceptors.request.use(async (config) => {
   return config
 })
 
+/** 管理口令 token 失效时通知 AdminView 回退到口令校验界面 */
+export const ADMIN_UNAUTHORIZED_EVENT = 'admin-unauthorized'
+
 client.interceptors.response.use(
   (response) => response.data,
   (error) => {
@@ -53,7 +64,15 @@ client.interceptors.response.use(
     console.error('[API Error]', message)
     if (error.response?.status === 401) {
       const url = error.config?.url || ''
-      if (!url.startsWith('/admin') && !url.startsWith('/auth/')) {
+      if (url.startsWith('/admin')) {
+        // /admin/verify 是口令校验本身（失败返回 403），不参与失效回退
+        if (!url.startsWith('/admin/verify')) {
+          localStorage.removeItem('admin_token')
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event(ADMIN_UNAUTHORIZED_EVENT))
+          }
+        }
+      } else if (!url.startsWith('/auth/')) {
         localStorage.removeItem('user_token')
         if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname)}`

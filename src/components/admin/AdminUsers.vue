@@ -32,6 +32,9 @@ async function fetchUsers() {
   usersLoading.value = true
   try {
     users.value = await adminApi.getUsers()
+  } catch {
+    // 401 由 client.ts 统一派发 admin-unauthorized，AdminView 会回退到口令校验界面
+    users.value = []
   } finally {
     usersLoading.value = false
   }

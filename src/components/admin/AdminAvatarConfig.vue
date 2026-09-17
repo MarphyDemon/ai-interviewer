@@ -25,6 +25,9 @@ async function fetchAvatarConfigs() {
   avatarLoading.value = true
   try {
     avatarConfigs.value = await adminApi.getAvatarConfigs()
+  } catch {
+    // 401 由 client.ts 统一派发 admin-unauthorized，AdminView 会回退到口令校验界面
+    avatarConfigs.value = []
   } finally {
     avatarLoading.value = false
   }

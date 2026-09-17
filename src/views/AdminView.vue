@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as adminApi from '@/api/admin'
+import { ADMIN_UNAUTHORIZED_EVENT } from '@/api/client'
 import { useUserStore } from '@/stores/user'
 import AdminKnowledge from '@/components/admin/AdminKnowledge.vue'
 import AdminLlmConfig from '@/components/admin/AdminLlmConfig.vue'
@@ -13,14 +14,35 @@ const { t } = useI18n()
 const userStore = useUserStore()
 
 const verified = ref(false)
+const expired = ref(false)
 const password = ref('')
 const activeTab = ref<'knowledge' | 'llm' | 'avatar' | 'users' | 'stats'>('knowledge')
 
+/** 管理接口返回 401 时（token 过期）回退到口令校验界面 */
+function handleUnauthorized() {
+  verified.value = false
+  expired.value = true
+}
+
 onMounted(async () => {
+  window.addEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized)
+
   const token = localStorage.getItem('admin_token')
-  const isAdmin = userStore.isAdmin
-  if (!token && !isAdmin) return
+  if (!token && !userStore.isAdmin) return
+
+  // 先乐观放行，再用一次轻量请求确认 token 是否仍然有效；
+  // 失效时 client.ts 的拦截器会派发 admin-unauthorized 事件把界面拉回口令校验
   verified.value = true
+  try {
+    await adminApi.getPlatformStats()
+  } catch {
+    verified.value = false
+    expired.value = true
+  }
+})
+
+onUnmounted(() => {
+  window.removeEventListener(ADMIN_UNAUTHORIZED_EVENT, handleUnauthorized)
 })
 
 async function verify() {
@@ -28,6 +50,8 @@ async function verify() {
     const res = await adminApi.verifyAdmin(password.value)
     localStorage.setItem('admin_token', res.token)
     verified.value = true
+    expired.value = false
+    password.value = ''
   } catch {
     alert(t('admin.wrongPassword'))
   }
@@ -40,6 +64,9 @@ async function verify() {
 
     <!-- 口令校验 -->
     <div v-if="!verified" class="card">
+      <p v-if="expired" class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        {{ t('admin.sessionExpired') }}
+      </p>
       <p class="mb-4 text-gray-600">{{ t('admin.enterPassword') }}</p>
       <div class="flex gap-2">
         <input

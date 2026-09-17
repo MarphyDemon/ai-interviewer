@@ -24,6 +24,9 @@ async function fetchConfigs() {
   loading.value = true
   try {
     configs.value = await adminApi.getLLMConfigs()
+  } catch {
+    // 401 由 client.ts 统一派发 admin-unauthorized，AdminView 会回退到口令校验界面
+    configs.value = []
   } finally {
     loading.value = false
   }
