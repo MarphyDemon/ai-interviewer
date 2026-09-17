@@ -7,35 +7,32 @@ from sqlmodel import Session, SQLModel, select
 from server.database import get_session
 from server.models import (
     Interview,
-    Resume,
     User,
     AlgorithmProblem,
     CodeSubmission,
 )
 from server.services.interview_service import (
-    generate_first_question,
     process_answer,
     generate_report,
     save_message,
     pick_algorithm_problem,
     format_problem_for_interview,
-    normalize_difficulty,
+    start_interview_session,
     _load_conversation,
 )
 from server.services.interview_stage import (
     STAGE_ALGORITHM,
-    advance_by_action,
     advance_stage,
     stage_payload,
 )
 from server.services.interview_tools import CHOICE_INTENTS, build_choices_widget
 from server.services.auth_service import get_current_user, verify_user_token
+from server.services import org_service
 from server.services.common import get_active_llm_config
 from server.services.judge_service import judge
 from server.services.interview_brain_service import create_interview_session
 from server.services.interview_event_bus import publish, subscribe
 from server.config import settings
-from server.models import JobDescription
 
 router = APIRouter(prefix="/api/interview", tags=["interview"])
 
@@ -74,54 +71,29 @@ async def start_interview(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    interview = Interview(
+    result = await start_interview_session(
+        session,
         user_id=user.id,
-        resume_id=req.resumeId,
-        jd_id=req.jdId,
         position=req.position,
-        # 前端传 junior/mid/senior，统一落库为中文难度（初级/中级/高级）
-        difficulty=normalize_difficulty(req.difficulty),
+        difficulty=req.difficulty,
         duration=req.duration,
         style=req.style,
+        resume_id=req.resumeId,
+        jd_id=req.jdId,
+        lang=req.lang,
     )
-    session.add(interview)
-    session.commit()
-    session.refresh(interview)
-
-    resume = session.get(Resume, req.resumeId) if req.resumeId else None
-    jd = session.get(JobDescription, req.jdId) if req.jdId else None
-
-    first = await generate_first_question(session, interview, resume, jd=jd, lang=req.lang)
-
-    # 状态机：开场 → 按首个 action 落到「提问 / 算法题」等阶段
-    advance_by_action(session, interview, first.get("action"))
-
-    save_message(
-        session, interview.id, "interviewer", first.get("content", ""),
-        question_index=1, followup_level=0,
-    )
+    interview = result["interview"]
+    first_question = result["firstQuestion"]
 
     response = {
         "interviewId": interview.id,
-        "stage": stage_payload(interview.stage),
-        "firstQuestion": {
-            "action": first.get("action", "ask"),
-            "content": first.get("content", ""),
-            "reasoning": first.get("reasoning", ""),
-        },
+        "stage": result["stage"],
+        "firstQuestion": first_question,
     }
 
-    # 如果首题是算法题，附带题目详情
-    if first.get("action") == "algorithm":
-        problem = pick_algorithm_problem(session, interview.difficulty)
-        if problem:
-            response["firstQuestion"]["problem"] = format_problem_for_interview(problem)
-
     # 交互控件：LLM 在开场让候选人做选择时下发可点选项
-    choices = first.get("choices") or []
-    if choices:
-        response["firstQuestion"]["choices"] = choices
-        _publish_choices(interview.id, choices, "请选择")
+    if first_question.get("choices"):
+        _publish_choices(interview.id, first_question["choices"], "请选择")
 
     return response
 
@@ -548,9 +520,9 @@ async def get_interview(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """获取单场面试详情。"""
+    """获取单场面试详情（本人 / 企业组织成员 / admin 可读）。"""
     interview = session.get(Interview, interview_id)
-    if not interview or interview.user_id != user.id:
+    if not org_service.can_view_interview(session, user, interview):
         raise HTTPException(404, "面试不存在")
     return _format_interview(interview)
 

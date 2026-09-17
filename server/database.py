@@ -16,6 +16,9 @@ def _run_migrations():
 
     migrations_sqlite = [
         ("interview", "jd_id", "INTEGER"),
+        ("interview", "org_id", "INTEGER"),
+        ("interview", "stage", "TEXT DEFAULT 'opening'"),
+        ("interview", "stage_updated_at", "DATETIME"),
         ("report", "match_score", "REAL"),
         ("report", "match_breakdown", "TEXT"),
         ("user", "username", "TEXT"),
@@ -35,6 +38,7 @@ def _run_migrations():
     migrations_postgres = [
         ("interview", "stage", "VARCHAR DEFAULT 'opening'"),
         ("interview", "stage_updated_at", "TIMESTAMP"),
+        ("interview", "org_id", "INTEGER"),
         ("avatarproviderconfig", "avatar_image", "VARCHAR DEFAULT ''"),
         ("user", "preferred_avatar_config_id", "INTEGER"),
         ("user", "role", "VARCHAR DEFAULT 'user'"),

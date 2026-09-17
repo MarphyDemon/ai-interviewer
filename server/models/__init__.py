@@ -56,6 +56,9 @@ class Interview(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
     resume_id: Optional[int] = Field(default=None, foreign_key="resume.id")
     jd_id: Optional[int] = Field(default=None, foreign_key="jobdescription.id")
+    # 企业筛选：由候选人邀请创建的面试会带上组织，个人练习恒为 NULL。
+    # 组织成员据此获得该场面试报告的只读权限（见 org_service.can_view_interview）。
+    org_id: Optional[int] = Field(default=None, foreign_key="organization.id", index=True)
     position: str
     difficulty: str
     duration: int = 30
@@ -339,3 +342,63 @@ class UserWeaknessProfile(SQLModel, table=True):
     last_interview_id: Optional[int] = Field(default=None, foreign_key="interview.id")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ---------- 企业侧（候选人初筛） ----------
+# 设计要点：候选人**不是**新的账号体系，而是 role="candidate" 的无密码 User。
+# 这样面试链路（stream / 报告 / 录音 / 具身播报 / 指标）全部零改动复用个人练习的那一套，
+# 企业侧新增的只有「组织」「邀请」「候选人归属」这三层关系。
+
+class Organization(SQLModel, table=True):
+    """企业组织：HR 侧的数据隔离边界。
+
+    个人练习用户不创建组织，其 Interview.org_id 恒为 NULL，行为与改造前完全一致。
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = ""
+    owner_id: int = Field(foreign_key="user.id", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class OrgMember(SQLModel, table=True):
+    """组织成员。role: owner（创建者）/ hr（可发邀请、看报告）/ viewer（只看报告）"""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    role: str = "hr"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CandidateInvite(SQLModel, table=True):
+    """候选人面试邀请：HR 创建后把链接发给候选人，候选人免注册即可作答。
+
+    difficulty / style 沿用前端词汇（junior|mid|senior、strict|friendly|pressure），
+    创建面试时再由 normalize_difficulty 与 _STYLE_DESC 转成模型可用的形式。
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
+    token: str = Field(unique=True, index=True)
+    position: str
+    jd_id: Optional[int] = Field(default=None, foreign_key="jobdescription.id")
+    difficulty: str = "mid"
+    duration: int = 30
+    style: str = "friendly"
+    note: str = ""
+    created_by: int = Field(foreign_key="user.id")
+    expires_at: Optional[datetime] = None
+    revoked: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Candidate(SQLModel, table=True):
+    """候选人：凭邀请链接进入后创建，落库为 role="candidate" 的无密码 User。
+
+    真正作答的是 user_id 指向的那个 User；本表只承载「姓名/联系方式 + 归属哪次邀请」。
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    invite_id: int = Field(foreign_key="candidateinvite.id", index=True)
+    org_id: int = Field(foreign_key="organization.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    name: str = ""
+    email: str = ""
+    created_at: datetime = Field(default_factory=datetime.utcnow)

@@ -92,7 +92,8 @@ def _format_user(user: User) -> dict:
             notif = {}
     return {
         "id": user.id,
-        "username": user.username,
+        # 候选人（role="candidate"）不占用户名，这里统一回空串，避免前端出现 null
+        "username": user.username or "",
         "role": user.role,
         "preferredAvatarConfigId": user.preferred_avatar_config_id,
         "preferredPosition": user.preferred_position,

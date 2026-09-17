@@ -8,6 +8,7 @@ import io
 from server.database import get_session
 from server.models import Report, Interview, User
 from server.services.auth_service import get_current_user
+from server.services import org_service
 
 router = APIRouter(prefix="/api/report", tags=["report"])
 
@@ -46,7 +47,8 @@ async def get_report(interview_id: int, session: Session = Depends(get_session),
     if not report:
         raise HTTPException(404, "Report not found")
     interview = session.get(Interview, report.interview_id)
-    if not interview or interview.user_id != user.id:
+    # 本人 / 企业组织成员（HR 查看候选人）/ admin 均可读
+    if not org_service.can_view_interview(session, user, interview):
         raise HTTPException(404, "Report not found")
     return _format_report(report)
 
@@ -60,7 +62,7 @@ async def export_report_pdf(interview_id: int, session: Session = Depends(get_se
         raise HTTPException(404, "Report not found")
 
     interview = session.get(Interview, report.interview_id)
-    if not interview or interview.user_id != user.id:
+    if not org_service.can_view_interview(session, user, interview):
         raise HTTPException(404, "Report not found")
 
     report_data = {
@@ -138,7 +140,7 @@ async def get_share_status(interview_id: int, session: Session = Depends(get_ses
     if not report:
         raise HTTPException(404, "Report not found")
     interview = session.get(Interview, report.interview_id)
-    if not interview or interview.user_id != user.id:
+    if not org_service.can_view_interview(session, user, interview):
         raise HTTPException(404, "Report not found")
     return {
         "token": report.share_token,

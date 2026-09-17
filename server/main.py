@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import Session
 
 from server.database import engine, init_db
-from server.routers import knowledge, resume, interview, report, admin, avatar, chat, jd, auth, code, files, recordings, settings, metrics, profile
+from server.routers import knowledge, resume, interview, report, admin, avatar, chat, jd, auth, code, files, recordings, settings, metrics, profile, org, invite
 from server.services.avatar_brain_service import (
     resolve_session,
     generate_stream,
@@ -61,6 +61,8 @@ app.include_router(files.router)
 app.include_router(recordings.router)
 app.include_router(metrics.router)
 app.include_router(profile.router)
+app.include_router(org.router)
+app.include_router(invite.router)
 
 
 @app.on_event("startup")

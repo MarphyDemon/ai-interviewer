@@ -13,6 +13,7 @@ from server.services.interview_stage import (
     advance_by_action,
     advance_stage,
     stage_hint,
+    stage_payload,
 )
 from server.services.profile_service import build_profile_context, refresh_profile_from_report
 from server.embedding.siliconflow import get_embedding
@@ -414,5 +415,76 @@ def format_problem_for_interview(problem: AlgorithmProblem) -> dict:
         "examples": json.loads(problem.examples) if problem.examples else [],
         "timeLimitMs": problem.time_limit_ms,
         "memoryLimitMb": problem.memory_limit_mb,
+    }
+
+
+async def start_interview_session(
+    session: Session,
+    *,
+    user_id: int,
+    position: str,
+    difficulty: str,
+    duration: int = 30,
+    style: str = "friendly",
+    resume_id: Optional[int] = None,
+    jd_id: Optional[int] = None,
+    lang: str = "en",
+    org_id: Optional[int] = None,
+) -> dict:
+    """创建一场面试并生成首题。
+
+    个人练习（/api/interview/start）与候选人邀请（/api/invite/{token}/start）共用本函数，
+    避免两条链路在「状态机推进 / 首题落库 / 算法题附带」这些细节上逐渐漂移。
+    org_id 仅在候选人邀请场景传入，用于把面试归属到企业组织。
+    """
+    interview = Interview(
+        user_id=user_id,
+        resume_id=resume_id,
+        jd_id=jd_id,
+        org_id=org_id,
+        position=position,
+        # 前端传 junior/mid/senior，统一落库为中文难度（初级/中级/高级）
+        difficulty=normalize_difficulty(difficulty),
+        duration=duration,
+        style=style,
+    )
+    session.add(interview)
+    session.commit()
+    session.refresh(interview)
+
+    resume = session.get(Resume, resume_id) if resume_id else None
+    jd = session.get(JobDescription, jd_id) if jd_id else None
+
+    first = await generate_first_question(session, interview, resume, jd=jd, lang=lang)
+
+    # 状态机：开场 → 按首个 action 落到「提问 / 算法题」等阶段
+    advance_by_action(session, interview, first.get("action"))
+
+    save_message(
+        session, interview.id, "interviewer", first.get("content", ""),
+        question_index=1, followup_level=0,
+    )
+
+    first_question = {
+        "action": first.get("action", "ask"),
+        "content": first.get("content", ""),
+        "reasoning": first.get("reasoning", ""),
+    }
+
+    # 如果首题是算法题，附带题目详情
+    if first.get("action") == "algorithm":
+        problem = pick_algorithm_problem(session, interview.difficulty)
+        if problem:
+            first_question["problem"] = format_problem_for_interview(problem)
+
+    # 交互控件：LLM 在开场让候选人做选择时下发可点选项
+    choices = first.get("choices") or []
+    if choices:
+        first_question["choices"] = choices
+
+    return {
+        "interview": interview,
+        "firstQuestion": first_question,
+        "stage": stage_payload(interview.stage),
     }
 
