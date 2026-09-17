@@ -82,13 +82,13 @@ const router = createRouter({
       path: '/metrics',
       name: 'metrics',
       component: () => import('@/views/MetricsView.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresEnterprise: true },
     },
     {
       path: '/org',
       name: 'org',
       component: () => import('@/views/OrgView.vue'),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresEnterprise: true },
     },
     {
       path: '/invite/:token',
@@ -117,13 +117,19 @@ const router = createRouter({
   ],
 })
 
-// 路由守卫：数据路由需登录，分享报告（带 token query）公开访问
-router.beforeEach((to) => {
+// 路由守卫：数据路由需登录，分享报告（带 token query）公开访问；
+// 企业侧路由（企业控制台 / 实测指标）额外要求企业身份
+router.beforeEach(async (to) => {
   if (to.meta.requiresAuth) {
     if (to.name === 'report' && to.query.token) return true
     const userStore = useUserStore()
     if (!userStore.isLoggedIn) {
       return { path: '/login', query: { redirect: to.fullPath } }
+    }
+    // 刷新页面时用户信息尚未加载，先补一次，避免企业侧路由被误判为无权限
+    if (!userStore.user) await userStore.fetchMe()
+    if (to.meta.requiresEnterprise && !userStore.isEnterprise) {
+      return { path: '/settings', query: { needEnterprise: '1' } }
     }
   }
   // 管理页允许已登录用户访问，密码验证由 AdminView 组件内部处理

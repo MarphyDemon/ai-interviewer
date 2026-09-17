@@ -17,9 +17,14 @@ const links = computed(() => {
     { name: 'chat', to: '/chat', label: t('nav.chat') },
     { name: 'code', to: '/code', label: t('nav.codePractice') },
     { name: 'history', to: '/history', label: t('nav.history') },
-    { name: 'metrics', to: '/metrics', label: t('nav.metrics') },
-    { name: 'org', to: '/org', label: t('nav.org') },
   ]
+  // 企业侧入口（企业控制台 / 实测指标）仅对企业身份展示，与路由守卫保持一致
+  if (userStore.isEnterprise) {
+    list.push(
+      { name: 'metrics', to: '/metrics', label: t('nav.metrics') },
+      { name: 'org', to: '/org', label: t('nav.org') },
+    )
+  }
   if (userStore.isAdmin) {
     list.push({ name: 'admin', to: '/admin', label: t('nav.admin') })
   }
@@ -42,21 +47,25 @@ function logout() {
 <template>
   <header class="sticky top-0 z-40 border-b border-primary-100/60 bg-white/80 backdrop-blur-lg">
     <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
-      <router-link to="/" class="flex items-center gap-2">
+      <router-link to="/" class="flex shrink-0 items-center gap-2">
         <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-brand text-white shadow-soft">
           <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
           </svg>
         </span>
-        <span class="text-lg font-bold text-gradient">{{ t('nav.brand') }}</span>
+        <span class="whitespace-nowrap text-lg font-bold text-gradient">{{ t('nav.brand') }}</span>
       </router-link>
 
-      <nav class="hidden items-center gap-1 md:flex">
+      <!-- 标签较多（企业侧入口）时保持单行：不换行，超宽改为横向滚动 -->
+      <nav
+        class="hidden min-w-0 flex-nowrap items-center gap-1 overflow-x-auto md:flex [&::-webkit-scrollbar]:hidden"
+        style="-ms-overflow-style: none; scrollbar-width: none;"
+      >
         <router-link
           v-for="link in links"
           :key="link.name"
           :to="link.to"
-          class="rounded-lg px-3 py-2 text-sm font-medium transition"
+          class="whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition"
           :class="
             isActive(link.to)
               ? 'bg-primary-50 text-primary-700'
@@ -67,7 +76,7 @@ function logout() {
         </router-link>
       </nav>
 
-      <div class="flex items-center gap-2">
+      <div class="flex shrink-0 items-center gap-2">
         <template v-if="userStore.isLoggedIn">
           <span class="hidden text-sm text-gray-600 sm:inline">{{ userStore.user?.username }}</span>
           <NotificationCenter />
