@@ -1,10 +1,11 @@
 import json
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select, or_
 from server.database import get_session
 from server.models import KnowledgeDoc, KnowledgeVersion, KnowledgeEditLock, KnowledgeCollaborator, User
+from server.services import org_service
 from server.services.knowledge_service import process_knowledge_doc, delete_knowledge
 from server.services.rag_service import delete_doc_chunks
 from server.services.auth_service import get_current_user, require_admin
@@ -36,6 +37,9 @@ def _get_doc_or_404(session: Session, doc_id: int, user: User) -> KnowledgeDoc:
     if not doc:
         raise HTTPException(404, "文档不存在")
     if doc.user_id != user.id and not doc.is_public:
+        # 企业知识库：同组织成员（owner/hr/viewer）均可访问
+        if org_service.can_view_org_resource(session, user, doc.user_id, doc.org_id):
+            return doc
         # Check collaborator permissions
         collab = session.exec(
             select(KnowledgeCollaborator).where(
@@ -48,12 +52,34 @@ def _get_doc_or_404(session: Session, doc_id: int, user: User) -> KnowledgeDoc:
     return doc
 
 
+def _visible_doc_conditions(session: Session, user: User) -> list:
+    """可见知识文档：本人 ∪ 全局公开 ∪ 所在组织知识库。"""
+    conditions = [
+        KnowledgeDoc.user_id == user.id,
+        KnowledgeDoc.is_public == True,  # noqa: E712
+    ]
+    org_id = org_service.user_org_id(session, user.id)
+    if org_id:
+        conditions.append(KnowledgeDoc.org_id == org_id)
+    return conditions
+
+
 @router.post("/upload")
 async def upload_knowledge(
     files: list[UploadFile] = File(...),
+    scope: str = Form("personal"),
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    """上传知识文档。scope=org 时归属到企业组织，供全组织面试 RAG 使用。"""
+    org_id = None
+    if scope == "org":
+        org_id = org_service.user_org_id(session, user.id)
+        if not org_id:
+            raise HTTPException(403, "当前账号未加入任何企业组织，无法上传企业知识库")
+        if not org_service.can_manage_invite(session, user, org_id):
+            raise HTTPException(403, "需要组织管理员权限（owner / hr）")
+
     ids = []
 
     for file in files:
@@ -65,6 +91,7 @@ async def upload_knowledge(
 
         doc = KnowledgeDoc(
             user_id=user.id,
+            org_id=org_id,
             filename=file.filename,
             content=text,
             status="processing",
@@ -88,8 +115,9 @@ async def process_knowledge_doc_async(doc_id: int):
 @router.get("")
 async def list_knowledge(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     docs = session.exec(
-        select(KnowledgeDoc).where(or_(KnowledgeDoc.user_id == user.id, KnowledgeDoc.is_public == True))
+        select(KnowledgeDoc).where(or_(*_visible_doc_conditions(session, user)))
     ).all()
+    my_org_id = org_service.user_org_id(session, user.id)
     return [
         {
             "id": d.id,
@@ -99,6 +127,9 @@ async def list_knowledge(session: Session = Depends(get_session), user: User = D
             "difficulty": d.difficulty,
             "tags": json.loads(d.tags) if d.tags else [],
             "status": d.status,
+            # 归属：org 表示企业知识库（全组织共享），personal 表示本人上传
+            "scope": "org" if (d.org_id and d.org_id == my_org_id) else "personal",
+            "orgId": d.org_id,
             "createdAt": d.created_at.isoformat() if d.created_at else None,
         }
         for d in docs
@@ -113,7 +144,9 @@ _DEFAULT_POSITIONS = ["前端", "后端", "算法", "产品", "测试", "测试�
 async def list_positions(session: Session = Depends(get_session), user: User = Depends(get_current_user)):
     """返回 DB distinct position + 兜底默认列表，合并去重"""
     rows = session.exec(
-        select(KnowledgeDoc.position).where(KnowledgeDoc.position != "", or_(KnowledgeDoc.user_id == user.id, KnowledgeDoc.is_public == True)).distinct()
+        select(KnowledgeDoc.position).where(
+            KnowledgeDoc.position != "", or_(*_visible_doc_conditions(session, user))
+        ).distinct()
     ).all()
     positions = [p for p in rows if p]
     # 合并兜底列表，去重保序
@@ -142,7 +175,7 @@ async def reindex_all(
     docs = session.exec(
         select(KnowledgeDoc).where(
             KnowledgeDoc.status == "ready",
-            or_(KnowledgeDoc.user_id == user.id, KnowledgeDoc.is_public == True),
+            or_(*_visible_doc_conditions(session, user)),
         )
     ).all()
     reindexed = 0
@@ -155,8 +188,9 @@ async def reindex_all(
 
 @router.delete("/{doc_id}")
 async def delete_doc(doc_id: int, session: Session = Depends(get_session), user: User = Depends(get_current_user)):
+    """删除文档：本人可删自己的文档；企业知识库由组织管理角色（owner/hr）可删。"""
     doc = session.get(KnowledgeDoc, doc_id)
-    if not doc or doc.user_id != user.id:
+    if not doc or not org_service.can_manage_org_resource(session, user, doc.user_id, doc.org_id):
         raise HTTPException(404, "Document not found")
     delete_knowledge(session, doc_id)
     return {"ok": True}

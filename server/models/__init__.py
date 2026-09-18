@@ -20,6 +20,8 @@ class User(SQLModel, table=True):
 class KnowledgeDoc(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    # 企业知识库：由组织成员上传时归属到组织，全组织共享；个人文档恒为 NULL
+    org_id: Optional[int] = Field(default=None, foreign_key="organization.id", index=True)
     filename: str
     title: str = ""
     position: str = ""
@@ -44,6 +46,8 @@ class Resume(SQLModel, table=True):
 class JobDescription(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    # 企业岗位 JD：由组织成员创建时归属到组织，全组织共享；个人练习的 JD 恒为 NULL
+    org_id: Optional[int] = Field(default=None, foreign_key="organization.id", index=True)
     title: str
     content: str = ""
     position: str = ""
@@ -63,6 +67,8 @@ class Interview(SQLModel, table=True):
     difficulty: str
     duration: int = 30
     style: str = "温和"
+    # 本次面试的考察重点（由 HR 在创建邀请时指定，注入面试 prompt）
+    focus: str = ""
     status: str = "进行中"
     # 面试流程状态机阶段（见 server/services/interview_stage.py）
     stage: str = "opening"
@@ -384,6 +390,8 @@ class CandidateInvite(SQLModel, table=True):
     duration: int = 30
     style: str = "friendly"
     note: str = ""
+    # 本次面试的考察重点（HR 自定义，随邀请落库并注入候选人面试的 prompt）
+    focus: str = ""
     created_by: int = Field(foreign_key="user.id")
     expires_at: Optional[datetime] = None
     revoked: bool = False

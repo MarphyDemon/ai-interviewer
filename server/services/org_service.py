@@ -14,12 +14,14 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlmodel import Session, select
+from sqlmodel import Session, or_, select
 
 from server.models import (
     Candidate,
     CandidateInvite,
     Interview,
+    JobDescription,
+    KnowledgeDoc,
     Organization,
     OrgMember,
     Report,
@@ -136,6 +138,103 @@ def can_manage_invite(session: Session, user: Optional[User], org_id: int) -> bo
     return member_role(session, org_id, user.id) in ORG_MANAGER_ROLES
 
 
+# ---------- 组织共享资源（JD / 知识库文档）的可见与可写判定 ----------
+
+def user_org_id(session: Session, user_id: Optional[int]) -> Optional[int]:
+    """用户所属组织 id（当前模型下一个用户只归属一个组织）。"""
+    if not user_id:
+        return None
+    member = session.exec(
+        select(OrgMember).where(OrgMember.user_id == user_id)
+    ).first()
+    return member.org_id if member else None
+
+
+def can_view_org_resource(
+    session: Session,
+    user: Optional[User],
+    owner_id: Optional[int],
+    org_id: Optional[int],
+) -> bool:
+    """组织共享资源可见性：本人、超管、同组织成员（owner/hr/viewer）。"""
+    if not user:
+        return False
+    if owner_id is not None and owner_id == user.id:
+        return True
+    if user.role == "admin":
+        return True
+    if not org_id:
+        return False
+    return member_role(session, org_id, user.id) in ORG_VIEWER_ROLES
+
+
+def can_manage_org_resource(
+    session: Session,
+    user: Optional[User],
+    owner_id: Optional[int],
+    org_id: Optional[int],
+) -> bool:
+    """组织共享资源可写性：本人、超管、组织管理角色（owner/hr）。"""
+    if not user:
+        return False
+    if owner_id is not None and owner_id == user.id:
+        return True
+    if user.role == "admin":
+        return True
+    if not org_id:
+        return False
+    return member_role(session, org_id, user.id) in ORG_MANAGER_ROLES
+
+
+def visible_knowledge_doc_ids(
+    session: Session,
+    user_id: Optional[int],
+    org_id: Optional[int],
+) -> set[int]:
+    """面试 RAG 可用的知识文档：全局公开 ∪ 本人私有 ∪ 所在组织知识库。
+
+    向量库（ChromaDB）的 chunk 上没有归属元数据，因此以数据库为权威，
+    检索出候选片段后再按本函数给出的 doc_id 集合过滤，避免私有文档跨用户串检。
+    """
+    conditions = [KnowledgeDoc.is_public == True]  # noqa: E712
+    if user_id:
+        conditions.append(KnowledgeDoc.user_id == user_id)
+    if org_id:
+        conditions.append(KnowledgeDoc.org_id == org_id)
+    rows = session.exec(select(KnowledgeDoc.id).where(or_(*conditions))).all()
+    return {int(r) for r in rows if r is not None}
+
+
+def visible_jd_ids(
+    session: Session,
+    user_id: Optional[int],
+    org_id: Optional[int],
+) -> set[int]:
+    """可选的岗位 JD：本人创建的 ∪ 所在组织共享的。"""
+    conditions = []
+    if user_id:
+        conditions.append(JobDescription.user_id == user_id)
+    if org_id:
+        conditions.append(JobDescription.org_id == org_id)
+    if not conditions:
+        return set()
+    rows = session.exec(select(JobDescription.id).where(or_(*conditions))).all()
+    return {int(r) for r in rows if r is not None}
+
+
+def filter_visible_chunks(results: list[dict], allowed: set[int]) -> list[dict]:
+    """按文档归属过滤向量检索结果（chunk metadata 里只有 doc_id）。"""
+    filtered = []
+    for r in results:
+        try:
+            doc_id = int((r.get("metadata") or {}).get("doc_id"))
+        except (TypeError, ValueError):
+            continue
+        if doc_id in allowed:
+            filtered.append(r)
+    return filtered
+
+
 # ---------- 候选人邀请 ----------
 
 def invite_is_active(invite: CandidateInvite) -> bool:
@@ -156,6 +255,7 @@ def create_invite(
     duration: int = 30,
     style: str = "friendly",
     note: str = "",
+    focus: str = "",
     expires_in_days: int = INVITE_DEFAULT_DAYS,
 ) -> CandidateInvite:
     invite = CandidateInvite(
@@ -167,6 +267,8 @@ def create_invite(
         duration=duration,
         style=style,
         note=note,
+        # 考察重点由 HR 自定义，候选人开始面试时注入 prompt
+        focus=focus.strip()[:2000],
         created_by=user.id,
         expires_at=datetime.utcnow() + timedelta(days=expires_in_days),
     )
@@ -275,6 +377,7 @@ def list_invites(session: Session, org_id: int) -> list[dict]:
             "duration": inv.duration,
             "style": inv.style,
             "note": inv.note,
+            "focus": inv.focus,
             "candidateCount": len(cands),
             "scoredCount": len(scores),
             "avgScore": round(sum(scores) / len(scores), 1) if scores else None,

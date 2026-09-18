@@ -34,6 +34,11 @@ def _run_migrations():
         ("user", "language", "TEXT DEFAULT 'zh'"),
         ("user", "theme", "TEXT DEFAULT 'light'"),
         ("user", "notification_settings", "TEXT DEFAULT '{}'"),
+        # v3.4 企业侧：JD / 知识库组织归属 + 邀请考察重点
+        ("jobdescription", "org_id", "INTEGER"),
+        ("knowledgedoc", "org_id", "INTEGER"),
+        ("candidateinvite", "focus", "TEXT DEFAULT ''"),
+        ("interview", "focus", "TEXT DEFAULT ''"),
     ]
     migrations_postgres = [
         ("interview", "stage", "VARCHAR DEFAULT 'opening'"),
@@ -46,6 +51,11 @@ def _run_migrations():
         ("user", "language", "VARCHAR DEFAULT 'zh'"),
         ("user", "theme", "VARCHAR DEFAULT 'light'"),
         ("user", "notification_settings", "VARCHAR DEFAULT '{}'"),
+        # v3.4 企业侧：JD / 知识库组织归属 + 邀请考察重点
+        ("jobdescription", "org_id", "INTEGER"),
+        ("knowledgedoc", "org_id", "INTEGER"),
+        ("candidateinvite", "focus", "VARCHAR DEFAULT ''"),
+        ("interview", "focus", "VARCHAR DEFAULT ''"),
     ]
 
     if is_sqlite:
