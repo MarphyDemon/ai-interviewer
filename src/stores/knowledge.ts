@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { KnowledgeDoc, KnowledgeVersionInfo, KnowledgeVersionDetail, CollaboratorInfo } from '@/types'
 import * as knowledgeApi from '@/api/knowledge'
+import type { KnowledgeScope } from '@/api/knowledge'
 
 export const useKnowledgeStore = defineStore('knowledge', () => {
   const docs = ref<KnowledgeDoc[]>([])
@@ -33,8 +34,8 @@ export const useKnowledgeStore = defineStore('knowledge', () => {
     }
   }
 
-  async function upload(files: File[]) {
-    const res = await knowledgeApi.uploadKnowledge(files)
+  async function upload(files: File[], scope: KnowledgeScope = 'personal') {
+    const res = await knowledgeApi.uploadKnowledge(files, scope)
     await fetchDocs()
     for (const id of res.ids) {
       pollStatus(id)

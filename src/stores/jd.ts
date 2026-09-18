@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { JobDescription } from '@/types'
 import * as jdApi from '@/api/jd'
+import type { JdScope } from '@/api/jd'
 
 export const useJdStore = defineStore('jd', () => {
   const jds = ref<JobDescription[]>([])
@@ -20,14 +21,14 @@ export const useJdStore = defineStore('jd', () => {
     }
   }
 
-  async function createJd(title: string, content: string, position = '') {
-    const jd = await jdApi.createJd(title, content, position)
+  async function createJd(title: string, content: string, position = '', scope: JdScope = 'personal') {
+    const jd = await jdApi.createJd(title, content, position, scope)
     jds.value.unshift(jd)
     return jd
   }
 
-  async function uploadJd(file: File, title = '', position = '') {
-    const jd = await jdApi.uploadJd(file, title, position)
+  async function uploadJd(file: File, title = '', position = '', scope: JdScope = 'personal') {
+    const jd = await jdApi.uploadJd(file, title, position, scope)
     jds.value.unshift(jd)
     return jd
   }

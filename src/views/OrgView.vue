@@ -4,7 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import * as orgApi from '@/api/org'
 import type { CandidateRow, InviteRow, OrgInfo } from '@/api/org'
+import type { JobDescription } from '@/types'
 import { useJdStore } from '@/stores/jd'
+import { useKnowledgeStore } from '@/stores/knowledge'
 
 /**
  * 企业控制台：面向 HR 的候选人初筛视图。
@@ -12,11 +14,15 @@ import { useJdStore } from '@/stores/jd'
  * 与个人练习的分工：
  * - 个人侧看「我自己练得怎么样」（历史 / 画像 / 实测指标）
  * - 企业侧看「这个岗位的候选人横向对比」（邀请 + 排名 + 报告）
+ *
+ * 企业侧还负责组织共享资源（岗位 JD 库 / 企业知识库）的维护，
+ * 以及创建邀请时自定义本次面试的考察重点。
  */
 
 const { t } = useI18n()
 const router = useRouter()
 const jdStore = useJdStore()
+const knowledgeStore = useKnowledgeStore()
 
 const loading = ref(true)
 const errorMsg = ref('')
@@ -34,14 +40,30 @@ const form = ref({
   duration: 30,
   style: 'friendly',
   note: '',
+  focus: '',
   expiresInDays: 30,
 })
 const lastCreatedLink = ref('')
+
+// 组织共享 JD：orgId 非空即归属组织，同组织成员均可选用
+const orgJds = computed(() => jdStore.jds.filter((j) => j.orgId !== null))
+const orgDocs = computed(() => knowledgeStore.docs.filter((d) => d.scope === 'org'))
+
+const jdForm = ref({ title: '', content: '' })
+const jdSaving = ref(false)
+const jdUploading = ref(false)
+const jdDeletingId = ref<number | null>(null)
+const jdFileInput = ref<HTMLInputElement | null>(null)
+
+const kbUploading = ref(false)
+const kbDeletingId = ref<number | null>(null)
+const kbFileInput = ref<HTMLInputElement | null>(null)
 
 const POSITIONS = ['前端', '后端', '算法', '产品', '测试']
 const DIFFICULTIES = ['junior', 'mid', 'senior'] as const
 const STYLES = ['friendly', 'strict', 'pressure'] as const
 const DURATIONS = [15, 30, 45, 60]
+
 
 const scoredCandidates = computed(() => candidates.value.filter((c) => c.totalScore !== null))
 const avgOfAll = computed(() => {
@@ -91,6 +113,7 @@ async function onCreate() {
       duration: form.value.duration,
       style: form.value.style,
       note: form.value.note,
+      focus: form.value.focus,
       expiresInDays: form.value.expiresInDays,
     })
     lastCreatedLink.value = inviteLink(res.token)
@@ -100,6 +123,86 @@ async function onCreate() {
     errorMsg.value = e?.message ?? String(e)
   } finally {
     creating.value = false
+  }
+}
+
+/** 保存一份组织共享 JD（纯文本） */
+async function onSaveJd() {
+  const title = jdForm.value.title.trim()
+  const content = jdForm.value.content.trim()
+  if (!title || !content) {
+    errorMsg.value = `${t('org.jdTitle')} / ${t('org.jdContent')}`
+    return
+  }
+  jdSaving.value = true
+  errorMsg.value = ''
+  try {
+    await jdStore.createJd(title, content, form.value.position, 'org')
+    jdForm.value = { title: '', content: '' }
+  } catch (e: any) {
+    errorMsg.value = e?.message ?? String(e)
+  } finally {
+    jdSaving.value = false
+  }
+}
+
+/** 上传 JD 文件并归属组织 */
+async function onUploadJdFile() {
+  const file = jdFileInput.value?.files?.[0]
+  if (!file) return
+  jdUploading.value = true
+  errorMsg.value = ''
+  try {
+    await jdStore.uploadJd(file, '', form.value.position, 'org')
+    jdFileInput.value!.value = ''
+  } catch (e: any) {
+    errorMsg.value = e?.message ?? String(e)
+  } finally {
+    jdUploading.value = false
+  }
+}
+
+async function onDeleteJd(jd: JobDescription) {
+  if (!window.confirm(t('org.deleteConfirm', { name: jd.title }))) return
+  jdDeletingId.value = jd.id
+  errorMsg.value = ''
+  try {
+    await jdStore.deleteJd(jd.id)
+  } catch (e: any) {
+    errorMsg.value = e?.message ?? String(e)
+  } finally {
+    jdDeletingId.value = null
+  }
+}
+
+/** 上传企业知识库文档（仅 .md，归属组织） */
+async function onUploadKb() {
+  const files = kbFileInput.value?.files
+  if (!files || files.length === 0) return
+  kbUploading.value = true
+  errorMsg.value = ''
+  try {
+    await knowledgeStore.upload(Array.from(files), 'org')
+    kbFileInput.value!.value = ''
+  } catch (e: any) {
+    errorMsg.value = e?.message ?? String(e)
+  } finally {
+    kbUploading.value = false
+  }
+}
+
+async function onDeleteKb(id: number) {
+  const doc = knowledgeStore.docs.find((d) => d.id === id)
+  const name = doc?.title || doc?.filename || String(id)
+  if (!window.confirm(t('org.deleteConfirm', { name }))) return
+  kbDeletingId.value = id
+  errorMsg.value = ''
+  try {
+    await knowledgeStore.remove(id)
+  } catch (e: any) {
+    errorMsg.value = e?.message ?? String(e)
+  } finally {
+    kbDeletingId.value = null
   }
 }
 
@@ -131,9 +234,9 @@ const copiedToken = ref('')
 onMounted(async () => {
   await load()
   try {
-    await jdStore.fetchJds()
+    await Promise.all([jdStore.fetchJds(), knowledgeStore.fetchDocs()])
   } catch {
-    // JD 列表属增强项，失败不阻塞
+    // 组织共享资源列表属增强项，失败不阻塞
   }
 })
 </script>
@@ -214,7 +317,9 @@ onMounted(async () => {
               class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
             >
               <option :value="null">{{ t('org.noJd') }}</option>
-              <option v-for="jd in jdStore.jds" :key="jd.id" :value="jd.id">{{ jd.title }}</option>
+              <option v-for="jd in jdStore.jds" :key="jd.id" :value="jd.id">
+                {{ jd.title }}{{ jd.orgId ? ` · ${t('org.jdShared')}` : '' }}
+              </option>
             </select>
           </label>
           <label class="block">
@@ -264,6 +369,17 @@ onMounted(async () => {
               class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
             />
           </label>
+          <label class="block md:col-span-2">
+            <span class="text-xs font-medium text-gray-700">{{ t('org.focus') }}</span>
+            <textarea
+              v-model="form.focus"
+              rows="3"
+              maxlength="2000"
+              :placeholder="t('org.focusPlaceholder')"
+              class="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+            <span class="mt-1 block text-[11px] text-gray-400">{{ t('org.focusHint') }}</span>
+          </label>
         </div>
         <button
           class="mt-3 rounded-lg bg-gradient-brand px-4 py-2 text-xs font-semibold text-white shadow-soft transition hover:opacity-90 disabled:opacity-50"
@@ -309,6 +425,13 @@ onMounted(async () => {
                 <td class="px-3 py-2">
                   <span class="font-medium text-gray-900">{{ inv.position }}</span>
                   <span v-if="inv.note" class="ml-1 text-gray-400">{{ inv.note }}</span>
+                  <span
+                    v-if="inv.focus"
+                    class="ml-1 rounded bg-primary-50 px-1 py-0.5 text-[10px] text-primary-700"
+                    :title="inv.focus"
+                  >
+                    {{ t('org.focus') }}
+                  </span>
                 </td>
                 <td class="px-3 py-2 text-gray-600">{{ t('difficulty.' + inv.difficulty) }}</td>
                 <td class="px-3 py-2 text-gray-600">
@@ -416,6 +539,162 @@ onMounted(async () => {
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- 组织 JD 库 -->
+      <div class="mt-6">
+        <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 class="text-sm font-semibold text-gray-800">{{ t('org.jdLib') }}</h2>
+          <span class="text-[11px] text-gray-400">{{ t('org.jdLibHint') }}</span>
+        </div>
+
+        <div v-if="org?.canManage" class="rounded-xl border border-gray-200 bg-white p-3">
+          <div class="grid gap-2 md:grid-cols-2">
+            <input
+              v-model="jdForm.title"
+              type="text"
+              maxlength="120"
+              :placeholder="t('org.jdTitle')"
+              class="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+            <div class="flex items-center">
+              <input
+                ref="jdFileInput"
+                type="file"
+                accept=".pdf,.docx,.md,.markdown,.txt"
+                class="hidden"
+                @change="onUploadJdFile"
+              />
+              <button
+                class="w-full rounded-lg border-2 border-dashed border-primary-200 px-3 py-2 text-xs text-primary-600 transition hover:border-primary-400 hover:bg-primary-50/50 disabled:opacity-60"
+                :disabled="jdUploading"
+                @click="jdFileInput?.click()"
+              >
+                {{ jdUploading ? t('org.jdUploading') : t('org.jdUpload') }}
+              </button>
+            </div>
+            <textarea
+              v-model="jdForm.content"
+              rows="3"
+              :placeholder="t('org.jdContent')"
+              class="rounded-lg border border-gray-200 px-3 py-2 text-sm md:col-span-2"
+            />
+          </div>
+          <button
+            class="mt-2 rounded-lg bg-gradient-brand px-4 py-2 text-xs font-semibold text-white shadow-soft transition hover:opacity-90 disabled:opacity-50"
+            :disabled="jdSaving"
+            @click="onSaveJd"
+          >
+            {{ jdSaving ? t('org.jdSaving') : t('org.jdSave') }}
+          </button>
+        </div>
+        <p v-else class="rounded-xl bg-gray-50 px-3 py-2 text-[11px] text-gray-500">
+          {{ t('org.manageOnly') }}
+        </p>
+
+        <p
+          v-if="!orgJds.length"
+          class="mt-2 rounded-xl border border-dashed border-gray-200 px-3 py-6 text-center text-xs text-gray-400"
+        >
+          {{ t('org.jdEmpty') }}
+        </p>
+        <div v-else class="mt-2 space-y-1.5">
+          <div
+            v-for="jd in orgJds"
+            :key="jd.id"
+            class="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2"
+          >
+            <div class="min-w-0">
+              <p class="truncate text-xs font-medium text-gray-900">{{ jd.title }}</p>
+              <p class="text-[11px] text-gray-400">{{ jd.position || '—' }} · {{ fmtDate(jd.createdAt) }}</p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <span class="rounded bg-primary-50 px-1.5 py-0.5 text-[11px] text-primary-700">
+                {{ t('org.jdShared') }}
+              </span>
+              <button
+                v-if="org?.canManage"
+                class="text-xs text-red-600 hover:underline disabled:opacity-50"
+                :disabled="jdDeletingId !== null"
+                @click="onDeleteJd(jd)"
+              >
+                {{ t('common.delete') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 企业知识库 -->
+      <div class="mt-6">
+        <div class="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 class="text-sm font-semibold text-gray-800">{{ t('org.kbLib') }}</h2>
+          <span class="text-[11px] text-gray-400">{{ t('org.kbLibHint') }}</span>
+        </div>
+
+        <div v-if="org?.canManage">
+          <input
+            ref="kbFileInput"
+            type="file"
+            accept=".md"
+            multiple
+            class="hidden"
+            @change="onUploadKb"
+          />
+          <button
+            class="w-full rounded-xl border-2 border-dashed border-primary-200 px-4 py-4 text-xs text-primary-600 transition hover:border-primary-400 hover:bg-primary-50/50 disabled:opacity-60"
+            :disabled="kbUploading"
+            @click="kbFileInput?.click()"
+          >
+            {{ kbUploading ? t('org.kbUploading') : t('org.kbUpload') }}
+          </button>
+        </div>
+        <p v-else class="rounded-xl bg-gray-50 px-3 py-2 text-[11px] text-gray-500">
+          {{ t('org.manageOnly') }}
+        </p>
+
+        <p
+          v-if="!orgDocs.length"
+          class="mt-2 rounded-xl border border-dashed border-gray-200 px-3 py-6 text-center text-xs text-gray-400"
+        >
+          {{ t('org.kbEmpty') }}
+        </p>
+        <div v-else class="mt-2 space-y-1.5">
+          <div
+            v-for="doc in orgDocs"
+            :key="doc.id"
+            class="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2"
+          >
+            <div class="min-w-0">
+              <p class="truncate text-xs font-medium text-gray-900">{{ doc.title || doc.filename }}</p>
+              <p class="text-[11px] text-gray-400">
+                {{ doc.position || '—' }} ·
+                <span
+                  :class="{
+                    'text-yellow-500': doc.status === 'processing',
+                    'text-green-500': doc.status === 'ready',
+                    'text-red-500': doc.status === 'failed',
+                  }"
+                >
+                  {{ doc.status }}
+                </span>
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <span class="rounded bg-primary-50 px-1.5 py-0.5 text-[11px] text-primary-700">
+                {{ t('org.kbShared') }}
+              </span>
+              <button
+                v-if="org?.canManage"
+                class="text-xs text-red-600 hover:underline disabled:opacity-50"
+                :disabled="kbDeletingId !== null"
+                @click="onDeleteKb(doc.id)"
+              >
+                {{ t('common.delete') }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

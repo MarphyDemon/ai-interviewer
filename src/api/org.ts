@@ -26,6 +26,8 @@ export interface InviteRow {
   duration: number
   style: string
   note: string
+  /** 本次面试的考察重点（HR 自定义） */
+  focus: string
   candidateCount: number
   scoredCount: number
   avgScore: number | null
@@ -57,6 +59,8 @@ export interface CreateInvitePayload {
   duration?: number
   style?: string
   note?: string
+  /** 本次面试的考察重点（HR 自定义，注入面试 prompt） */
+  focus?: string
   expiresInDays?: number
 }
 

@@ -178,6 +178,9 @@ export interface KnowledgeDoc {
   difficulty: string
   tags: string[]
   status: 'processing' | 'ready' | 'failed'
+  /** org：企业知识库（全组织共享）；personal：本人上传 */
+  scope: 'org' | 'personal'
+  orgId: number | null
   createdAt: string
 }
 
@@ -199,6 +202,8 @@ export interface JobDescription {
   title: string
   content: string
   position: string
+  /** 非空表示这是企业组织共享的 JD */
+  orgId: number | null
   createdAt: string
   updatedAt: string
 }

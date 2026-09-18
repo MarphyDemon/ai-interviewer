@@ -1,9 +1,16 @@
 import client from './client'
 import type { KnowledgeDoc, KnowledgeVersionInfo, KnowledgeVersionDetail, CollaboratorInfo } from '@/types'
 
-export function uploadKnowledge(files: File[]): Promise<{ ids: number[] }> {
+/** 上传作用域：personal=个人知识库；org=企业知识库（全组织共享） */
+export type KnowledgeScope = 'personal' | 'org'
+
+export function uploadKnowledge(
+  files: File[],
+  scope: KnowledgeScope = 'personal',
+): Promise<{ ids: number[] }> {
   const formData = new FormData()
   files.forEach((file) => formData.append('files', file))
+  formData.append('scope', scope)
   return client.post('/knowledge/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
