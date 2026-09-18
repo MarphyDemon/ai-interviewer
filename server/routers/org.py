@@ -25,6 +25,8 @@ class InviteCreateRequest(BaseModel):
     duration: int = 30
     style: str = "friendly"
     note: str = ""
+    # 本次面试的考察重点（HR 自定义，注入候选人面试的 prompt）
+    focus: str = ""
     expiresInDays: int = 30
 
 
@@ -91,6 +93,7 @@ async def create_invite(
         duration=req.duration,
         style=req.style,
         note=req.note,
+        focus=req.focus,
         expires_in_days=max(1, min(req.expiresInDays, 365)),
     )
     return {

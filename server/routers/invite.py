@@ -81,6 +81,7 @@ async def start_by_invite(
         jd_id=invite.jd_id,
         lang=req.lang,
         org_id=invite.org_id,
+        focus=invite.focus,
     )
     interview = result["interview"]
 
