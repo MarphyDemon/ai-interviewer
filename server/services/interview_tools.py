@@ -413,7 +413,13 @@ async def _tool_retrieve_knowledge(session: Session, ctx: ToolContext, args: dic
     position = interview.position if interview else ""
     difficulty = interview.difficulty if interview else ""
 
-    knowledge = await _retrieve_knowledge(session, query or position, difficulty)
+    knowledge = await _retrieve_knowledge(
+        session,
+        query or position,
+        difficulty,
+        user_id=interview.user_id if interview else None,
+        org_id=interview.org_id if interview else None,
+    )
     if not knowledge:
         return {"ok": False, "speak": "题库中未检索到相关素材。", "widget": None, "data": {}}
 

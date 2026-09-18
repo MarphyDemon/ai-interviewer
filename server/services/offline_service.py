@@ -530,20 +530,35 @@ def keyword_search(
     query: str,
     top_k: int = 5,
     position: Optional[str] = None,
+    doc_ids: Optional[set[int]] = None,
 ) -> list[str]:
-    """离线检索：对 KnowledgeDoc 正文做关键词打分，替代向量检索。"""
+    """离线检索：对 KnowledgeDoc 正文做关键词打分，替代向量检索。
+
+    doc_ids 传入时只在这些文档内检索——面试链路据此做归属过滤，
+    避免私有文档或他人组织的知识被检索到。
+    """
     from server.models import KnowledgeDoc
 
     terms = re.findall(r"[A-Za-z][A-Za-z0-9+#.]{2,}|[\u4e00-\u9fa5]{2,}", query or "")
     if not terms:
         return []
 
+    allowed_ids = list(doc_ids) if doc_ids is not None else None
+    if allowed_ids is not None and not allowed_ids:
+        return []
+
     stmt = select(KnowledgeDoc)
+    if allowed_ids is not None:
+        stmt = stmt.where(KnowledgeDoc.id.in_(allowed_ids))
     if position:
         stmt = stmt.where(KnowledgeDoc.position == position)
     docs = session.exec(stmt).all()
     if not docs and position:
-        docs = session.exec(select(KnowledgeDoc)).all()
+        # 放宽岗位过滤重试，但归属约束必须保留
+        fallback = select(KnowledgeDoc)
+        if allowed_ids is not None:
+            fallback = fallback.where(KnowledgeDoc.id.in_(allowed_ids))
+        docs = session.exec(fallback).all()
 
     scored: list[tuple[int, str]] = []
     for doc in docs:

@@ -1,23 +1,39 @@
 from datetime import datetime
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from sqlmodel import Session, select
 from server.models import ChatConversation, ChatMessage
-from server.services import offline_service
+from server.services import offline_service, org_service
 from server.services.llm_service import llm_chat_stream
 from server.services.rag_service import search
 from server.embedding.siliconflow import get_embedding
 
 
-async def _retrieve_knowledge(session: Session, query: str, top_k: int = 5) -> str:
-    """检索知识库（不过滤岗位），返回拼接的上下文。失败时返回空串，退化为纯 LLM 回答。"""
+async def _retrieve_knowledge(
+    session: Session,
+    query: str,
+    top_k: int = 5,
+    user_id: Optional[int] = None,
+) -> str:
+    """检索知识库（不过滤岗位），只使用当前用户可见的文档。
+
+    可见范围：全局公开 ∪ 本人私有 ∪ 所在组织知识库。失败时返回空串，退化为纯 LLM 回答。
+    """
+    allowed = org_service.visible_knowledge_doc_ids(
+        session, user_id, org_service.user_org_id(session, user_id)
+    )
+    if not allowed:
+        return ""
     if offline_service.enabled():
-        return "\n---\n".join(offline_service.keyword_search(session, query, top_k=top_k))
+        return "\n---\n".join(
+            offline_service.keyword_search(session, query, top_k=top_k, doc_ids=allowed)
+        )
     try:
         embedding = await get_embedding(query)
-        results = search(embedding, top_k=top_k)
-        if not results:
+        candidates = search(embedding, top_k=top_k * 4)
+        visible = org_service.filter_visible_chunks(candidates, allowed)[:top_k]
+        if not visible:
             return ""
-        return "\n---\n".join([r["content"] for r in results])
+        return "\n---\n".join([r["content"] for r in visible])
     except Exception as e:
         print(f"[Chat RAG] retrieval failed: {e}")
         return ""
@@ -57,8 +73,10 @@ async def stream_chat(
     ).all()
     session.commit()
 
-    # 4. RAG 检索知识库
-    knowledge = await _retrieve_knowledge(session, user_message)
+    # 4. RAG 检索知识库（按会话归属用户过滤可见范围）
+    knowledge = await _retrieve_knowledge(
+        session, user_message, user_id=conv.user_id if conv else None
+    )
 
     # 5. 构建消息列表
     messages = [{"role": "system", "content": _build_system_prompt(knowledge)}]

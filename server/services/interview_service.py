@@ -5,7 +5,7 @@ from typing import Optional
 from sqlmodel import Session, select
 from server.models import Interview, InterviewMessage, Report, Resume, JobDescription, AlgorithmProblem
 from server.services.llm_service import llm_chat
-from server.services import offline_service
+from server.services import offline_service, org_service
 from server.services.rag_service import search
 from server.services.interview_stage import (
     STAGE_FINISHED,
@@ -56,7 +56,13 @@ async def generate_first_question(
     jd: Optional[JobDescription] = None,
     lang: str = "en",
 ) -> dict:
-    knowledge_context = await _retrieve_knowledge(session, interview.position, interview.difficulty)
+    knowledge_context = await _retrieve_knowledge(
+        session,
+        interview.position,
+        interview.difficulty,
+        user_id=interview.user_id,
+        org_id=interview.org_id,
+    )
 
     resume_text = ""
     if resume:
@@ -73,6 +79,7 @@ async def generate_first_question(
         knowledge=knowledge_context,
         resume_text=resume_text,
         jd_text=jd_text,
+        focus_text=interview.focus,
         lang=lang,
         stage=interview.stage,
         profile=build_profile_context(session, interview.user_id, interview.position),
@@ -102,7 +109,13 @@ async def process_answer(
 
     remaining = _check_remaining_time(interview)
 
-    knowledge_context = await _retrieve_knowledge(session, interview.position, interview.difficulty)
+    knowledge_context = await _retrieve_knowledge(
+        session,
+        interview.position,
+        interview.difficulty,
+        user_id=interview.user_id,
+        org_id=interview.org_id,
+    )
 
     jd_text = ""
     if interview.jd_id:
@@ -116,6 +129,7 @@ async def process_answer(
         style=interview.style,
         knowledge=knowledge_context,
         jd_text=jd_text,
+        focus_text=interview.focus,
         stage=interview.stage,
         profile=build_profile_context(session, interview.user_id, interview.position),
     )
@@ -145,7 +159,13 @@ async def generate_report(session: Session, interview: Interview) -> Report:
     messages = _load_conversation(session, interview.id)
     resume = session.get(Resume, interview.resume_id) if interview.resume_id else None
     jd = session.get(JobDescription, interview.jd_id) if interview.jd_id else None
-    knowledge = await _retrieve_knowledge(session, interview.position, interview.difficulty)
+    knowledge = await _retrieve_knowledge(
+        session,
+        interview.position,
+        interview.difficulty,
+        user_id=interview.user_id,
+        org_id=interview.org_id,
+    )
 
     conversation_text = "\n".join(
         [f"{'Interviewer' if m['role'] == 'assistant' else 'Candidate'}: {m['content']}" for m in messages]
@@ -244,21 +264,41 @@ Job Description (if available):
     return report
 
 
-async def _retrieve_knowledge(session: Session, position: str, difficulty: str) -> str:
+async def _retrieve_knowledge(
+    session: Session,
+    position: str,
+    difficulty: str,
+    *,
+    user_id: Optional[int] = None,
+    org_id: Optional[int] = None,
+) -> str:
+    """检索本场面试可用的知识素材：全局公开 ∪ 本人私有 ∪ 所在组织知识库。
+
+    向量库的 chunk 上没有归属元数据，因此以数据库为权威做二次过滤，
+    避免私有或他人组织的知识被检索到（存量数据无需重建索引）。
+    """
+    allowed = org_service.visible_knowledge_doc_ids(session, user_id, org_id)
+    if not allowed:
+        return ""
+
     query_text = f"{position} {difficulty} 面试题"
     if offline_service.enabled():
         # 离线规则模式：关键词检索（无向量化）
         return "\n---\n".join(
-            offline_service.keyword_search(session, query_text, top_k=5, position=position)
+            offline_service.keyword_search(
+                session, query_text, top_k=5, position=position, doc_ids=allowed
+            )
         )
     try:
         embedding = await get_embedding(query_text)
-        # 先尝试按 position 过滤，没结果则全库搜索
-        results = []
+        # 先尝试按 position 过滤，没结果则全库搜索；
+        # 多取候选片段（20 条），按归属过滤后再截断到 5 条
+        candidates: list[dict] = []
         if position:
-            results = search(embedding, top_k=5, where={"position": position})
-        if not results:
-            results = search(embedding, top_k=5)
+            candidates = search(embedding, top_k=20, where={"position": position})
+        if not candidates:
+            candidates = search(embedding, top_k=20)
+        results = org_service.filter_visible_chunks(candidates, allowed)[:5]
         return "\n---\n".join([r["content"] for r in results])
     except Exception as e:
         print(f"[RAG] retrieval failed: {e}")
@@ -272,6 +312,7 @@ def _build_system_prompt(
     knowledge: str = "",
     resume_text: str = "",
     jd_text: str = "",
+    focus_text: str = "",
     lang: str = "en",
     stage: str = "",
     profile: str = "",
@@ -324,6 +365,11 @@ Action meanings:
 """
     if jd_text:
         prompt += f"\n目标岗位 JD（据此针对性提问与追问）：\n{jd_text}\n"
+    if focus_text:
+        if lang == "zh":
+            prompt += f"\n本次面试的考察重点（面试官指定，务必覆盖）：\n{focus_text}\n"
+        else:
+            prompt += f"\nFocus areas required by the interviewer (must be covered):\n{focus_text}\n"
     if knowledge:
         prompt += f"\n参考知识素材（可据此出题和判卷）：\n{knowledge}\n"
     if resume_text:
@@ -430,12 +476,14 @@ async def start_interview_session(
     jd_id: Optional[int] = None,
     lang: str = "en",
     org_id: Optional[int] = None,
+    focus: str = "",
 ) -> dict:
     """创建一场面试并生成首题。
 
     个人练习（/api/interview/start）与候选人邀请（/api/invite/{token}/start）共用本函数，
     避免两条链路在「状态机推进 / 首题落库 / 算法题附带」这些细节上逐渐漂移。
-    org_id 仅在候选人邀请场景传入，用于把面试归属到企业组织。
+    org_id / focus 仅在候选人邀请场景传入：前者把面试归属到企业组织，
+    后者是 HR 指定的考察重点，会注入每一轮的面试 prompt。
     """
     interview = Interview(
         user_id=user_id,
@@ -447,6 +495,7 @@ async def start_interview_session(
         difficulty=normalize_difficulty(difficulty),
         duration=duration,
         style=style,
+        focus=(focus or "").strip()[:2000],
     )
     session.add(interview)
     session.commit()

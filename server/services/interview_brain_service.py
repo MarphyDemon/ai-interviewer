@@ -146,6 +146,8 @@ def build_interviewer_prompt(
 """
     if jd_text:
         prompt += f"\n## 目标岗位 JD（据此针对性提问与追问）\n{jd_text}\n"
+    if interview.focus:
+        prompt += f"\n## 本次面试的考察重点（面试官指定，务必覆盖）\n{interview.focus}\n"
     if resume_text:
         prompt += f"\n## 候选人简历（可针对性提问项目经历）\n{resume_text}\n"
     if knowledge:
@@ -171,11 +173,17 @@ def build_interviewer_prompt(
 
 # ---------- 上下文加载 ----------
 
-async def _retrieve_knowledge(session: Session, position: str, difficulty: str) -> str:
-    """复用面试编排的 RAG 检索（按 position 过滤，无结果则全库）。"""
+async def _retrieve_knowledge(session: Session, interview: Interview) -> str:
+    """复用面试编排的 RAG 检索（按归属过滤：全局公开 ∪ 本人私有 ∪ 所在组织知识库）。"""
     from server.services.interview_service import _retrieve_knowledge as _rk
 
-    return await _rk(session, position, difficulty)
+    return await _rk(
+        session,
+        interview.position,
+        interview.difficulty,
+        user_id=interview.user_id,
+        org_id=interview.org_id,
+    )
 
 
 def _load_messages(session: Session, interview: Interview) -> list[dict]:
@@ -334,7 +342,7 @@ async def generate_interview_stream(
         # 落库候选人回答（_build_context 会一并读出，无需再单独追加）
         save_message(db, interview_id, "user", user_message)
 
-        knowledge = await _retrieve_knowledge(db, interview.position, interview.difficulty)
+        knowledge = await _retrieve_knowledge(db, interview)
         messages = _build_context(db, interview, knowledge)
         cfg = get_active_llm_config(db)
         ctx = ToolContext(interview_id=interview_id, user_id=interview.user_id or 0)
@@ -547,7 +555,7 @@ async def generate_interview_non_stream(
         # 落库候选人回答（_build_context 会一并读出，无需再单独追加）
         save_message(db, interview_id, "user", user_message)
 
-        knowledge = await _retrieve_knowledge(db, interview.position, interview.difficulty)
+        knowledge = await _retrieve_knowledge(db, interview)
         messages = _build_context(db, interview, knowledge)
         cfg = get_active_llm_config(db)
         ctx = ToolContext(interview_id=interview_id, user_id=interview.user_id or 0)

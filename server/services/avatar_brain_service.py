@@ -91,16 +91,29 @@ def resolve_session(
 
 # ---------- RAG + LLM 推理 ----------
 
-async def _retrieve_knowledge(query: str, top_k: int = 5) -> str:
+async def _retrieve_knowledge(
+    session: Session,
+    query: str,
+    user_id: Optional[int] = None,
+    top_k: int = 5,
+) -> str:
+    """检索当前用户可见的知识库（全局公开 ∪ 本人私有 ∪ 所在组织），失败时降级为空串。"""
+    from server.services import org_service
     from server.services.rag_service import search
     from server.embedding.siliconflow import get_embedding
 
+    allowed = org_service.visible_knowledge_doc_ids(
+        session, user_id, org_service.user_org_id(session, user_id)
+    )
+    if not allowed:
+        return ""
     try:
         embedding = await get_embedding(query)
-        results = search(embedding, top_k=top_k)
-        if not results:
+        candidates = search(embedding, top_k=top_k * 4)
+        visible = org_service.filter_visible_chunks(candidates, allowed)[:top_k]
+        if not visible:
             return ""
-        return "\n---\n".join([r["content"] for r in results])
+        return "\n---\n".join([r["content"] for r in visible])
     except Exception as e:
         print(f"[Avatar Brain] RAG retrieval failed: {e}")
         return ""
@@ -179,8 +192,8 @@ async def generate_stream(
         db.commit()
         db.refresh(conv)
 
-        # RAG 检索
-        knowledge = await _retrieve_knowledge(user_message)
+        # RAG 检索（按会话归属用户过滤可见范围）
+        knowledge = await _retrieve_knowledge(db, user_message, conv.user_id if conv else None)
         messages = _build_messages(db, conversation_id, user_message, knowledge)
 
         cfg = get_active_llm_config(db)
@@ -286,7 +299,7 @@ async def generate_non_stream(
         if conv and (not conv.title or conv.title == "新对话"):
             conv.title = user_message[:20] + ("…" if len(user_message) > 20 else "")
 
-        knowledge = await _retrieve_knowledge(user_message)
+        knowledge = await _retrieve_knowledge(db, user_message, conv.user_id if conv else None)
         messages = _build_messages(db, conversation_id, user_message, knowledge)
         cfg = get_active_llm_config(db)
 
