@@ -206,7 +206,7 @@ export default {
   },
   metrics: {
     title: 'Live Metrics',
-    subtitle: 'Measured values from the embodied pipeline (auto-instrumented, not estimates)',
+    subtitle: 'Measured values from the embodied pipeline across all interviews (auto-instrumented, not estimates)',
     days: 'Range',
     days7: 'Last 7 days',
     days30: 'Last 30 days',
@@ -401,7 +401,7 @@ export default {
     redeemFailed: 'Redemption failed. Please check the invite code.',
     redeemHint: 'An invite code upgrades your plan and unlocks more interviews and AI calls.',
     enterpriseOnlyHint:
-      'The hiring console and live metrics are enterprise features. Redeem an enterprise invite code here, or register with the "Enterprise hiring" account type.',
+      'The hiring console is an enterprise feature. Redeem an enterprise invite code here, or register with the "Enterprise hiring" account type.',
     plans: {
       free: 'Free',
       standard: 'Standard',

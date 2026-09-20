@@ -106,7 +106,7 @@ export const useUserStore = defineStore('user', () => {
 
   const isAdmin = computed(() => user.value?.role === 'admin')
 
-  /** 企业侧能力（企业控制台 / 实测指标）：有组织归属、企业版套餐或超管 */
+  /** 企业侧能力（企业控制台）：有组织归属、企业版套餐或超管 */
   const isEnterprise = computed(
     () =>
       !!user.value?.orgRole ||

@@ -202,7 +202,7 @@ export default {
   },
   metrics: {
     title: '实测指标',
-    subtitle: '具身链路真实实测数据（自动埋点，非估算值）',
+    subtitle: '全站具身链路真实实测数据（自动埋点，非估算值）',
     days: '统计范围',
     days7: '近 7 天',
     days30: '近 30 天',
@@ -396,7 +396,7 @@ export default {
     redeemSuccess: '兑换成功！您的账户已升级为{plan}',
     redeemFailed: '兑换失败，请检查邀请码是否正确',
     redeemHint: '使用邀请码可升级账户套餐，解锁更多面试次数和 AI 调用额度。',
-    enterpriseOnlyHint: '企业控制台与实测指标为企业客户专属功能。可在此页兑换企业版邀请码，或使用「企业招聘」身份注册。',
+    enterpriseOnlyHint: '企业控制台为企业客户专属功能。可在此页兑换企业版邀请码，或使用「企业招聘」身份注册。',
     plans: {
       free: '免费版',
       standard: '标准版',

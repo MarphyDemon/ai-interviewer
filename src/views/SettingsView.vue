@@ -14,7 +14,7 @@ const { t } = useI18n()
 const route = useRoute()
 const userStore = useUserStore()
 
-/** 由路由守卫重定向而来：该页面（企业控制台 / 实测指标）需要企业身份 */
+/** 由路由守卫重定向而来：企业控制台需要企业身份 */
 const needEnterprise = ref(route.query.needEnterprise === '1')
 
 const activeTab = ref<'personal' | 'platform'>('personal')

@@ -18,15 +18,16 @@ const links = computed(() => {
     { name: 'code', to: '/code', label: t('nav.codePractice') },
     { name: 'history', to: '/history', label: t('nav.history') },
   ]
-  // 企业侧入口（企业控制台 / 实测指标）仅对企业身份展示，与路由守卫保持一致
+  // 企业侧入口（企业控制台）仅对企业身份展示，与路由守卫保持一致
   if (userStore.isEnterprise) {
+    list.push({ name: 'org', to: '/org', label: t('nav.org') })
+  }
+  // 实测指标为平台级数据，仅平台管理员可见
+  if (userStore.isAdmin) {
     list.push(
       { name: 'metrics', to: '/metrics', label: t('nav.metrics') },
-      { name: 'org', to: '/org', label: t('nav.org') },
+      { name: 'admin', to: '/admin', label: t('nav.admin') },
     )
-  }
-  if (userStore.isAdmin) {
-    list.push({ name: 'admin', to: '/admin', label: t('nav.admin') })
   }
   return list
 })
