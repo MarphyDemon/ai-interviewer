@@ -251,6 +251,7 @@ async def runtime_mode():
     - unconfigured：未配置 LLM
     """
     from server.config import settings as app_settings
+    from server.services.avatar_config_service import resolve_default_avatar_config
 
     url = (app_settings.llm_base_url or "").lower()
     if app_settings.offline_mode:
@@ -262,9 +263,13 @@ async def runtime_mode():
     else:
         mode = "unconfigured"
 
+    # 具身智能体配置已下沉到数据库（.env 不再参与），这里实时查一次
+    with Session(engine) as session:
+        avatar_configured = resolve_default_avatar_config(session) is not None
+
     return {
         "mode": mode,
         "llmModel": app_settings.llm_model,
         "embeddingProvider": app_settings.embedding_provider,
-        "avatarConfigured": bool(app_settings.avatar_app_id and app_settings.avatar_app_secret),
+        "avatarConfigured": avatar_configured,
     }

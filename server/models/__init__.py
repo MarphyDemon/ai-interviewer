@@ -139,7 +139,11 @@ class ChatMessage(SQLModel, table=True):
 
 
 class AvatarProviderConfig(SQLModel, table=True):
-    """具身交互智能体服务凭证（ASR/TTS/形象捆绑，镜像 LLMConfig 模式）"""
+    """具身交互智能体服务凭证（ASR/TTS/形象捆绑，镜像 LLMConfig 模式）
+
+    is_default 表示"全站默认"，互斥（全表至多一条为真），由管理后台显式指定；
+    is_active 表示"是否在首页形象列表展示"，两者语义独立。
+    """
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     app_id: str
@@ -147,6 +151,7 @@ class AvatarProviderConfig(SQLModel, table=True):
     gateway_server: str
     avatar_image: str = ""  # 具身交互智能体形象图片 URL
     is_active: bool = False
+    is_default: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

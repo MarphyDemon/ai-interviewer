@@ -7,10 +7,14 @@ PROJECT_ROOT = BASE_DIR.parent
 
 
 class Settings(BaseSettings):
+    # ⚠️ 已废弃（v3.5）：具身智能体默认凭证已下沉到数据库表 avatarproviderconfig，
+    # 运行时不再读取以下四项。保留字段仅为兼容一次性搬迁
+    # （database._seed_avatar_config_from_env），搬迁完成后可从 .env 中移除。
     avatar_app_id: str = ""
     avatar_app_secret: str = ""
     avatar_gateway_server: str = "https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session"
-    avatar_default_image: str = "https://public-xmov.oss-cn-hangzhou.aliyuncs.com/avatar_sdk_material/M_CN03_show03__1080x1920__FS001__3DS16__T4__caixiangyu_15339_new.png"
+    avatar_default_image: str = ""
+    # brain 代理地址（魔珐云端回调），与凭证无关，仍需配置
     avatar_proxy_base_url: str = ""
 
     llm_base_url: str = "https://api.deepseek.com"

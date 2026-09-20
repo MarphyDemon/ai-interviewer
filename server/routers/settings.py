@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Session, select
 from server.database import get_session
-from server.models import User, UserQuota, Notification
+from server.models import AvatarProviderConfig, User, UserQuota, Notification
 from server.services.auth_service import get_current_user
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -53,8 +53,15 @@ async def update_personal_settings(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    if req.preferredAvatarConfigId is not None:
-        user.preferred_avatar_config_id = req.preferredAvatarConfigId
+    # 显式传 null 表示"清空偏好、回退到全站默认"；传数字则校验配置仍然存在
+    if "preferredAvatarConfigId" in req.model_fields_set:
+        if req.preferredAvatarConfigId is None:
+            user.preferred_avatar_config_id = None
+        else:
+            cfg = session.get(AvatarProviderConfig, req.preferredAvatarConfigId)
+            if not cfg:
+                raise HTTPException(status_code=404, detail="Avatar config not found")
+            user.preferred_avatar_config_id = req.preferredAvatarConfigId
     if req.preferredPosition is not None:
         user.preferred_position = req.preferredPosition
     if req.language is not None:

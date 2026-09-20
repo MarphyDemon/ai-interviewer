@@ -138,6 +138,8 @@ export interface AIResponse {
 }
 
 export interface AvatarConfig {
+  /** 后端是否解析出可用的具身智能体配置；false 时前端直接降级本地形象 */
+  configured: boolean
   appId: string
   appSecret: string
   gatewayServer: string

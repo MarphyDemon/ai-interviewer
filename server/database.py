@@ -39,6 +39,8 @@ def _run_migrations():
         ("knowledgedoc", "org_id", "INTEGER"),
         ("candidateinvite", "focus", "TEXT DEFAULT ''"),
         ("interview", "focus", "TEXT DEFAULT ''"),
+        # v3.5 具身智能体：默认配置下沉到数据库
+        ("avatarproviderconfig", "is_default", "INTEGER DEFAULT 0"),
     ]
     migrations_postgres = [
         ("interview", "stage", "VARCHAR DEFAULT 'opening'"),
@@ -56,6 +58,8 @@ def _run_migrations():
         ("knowledgedoc", "org_id", "INTEGER"),
         ("candidateinvite", "focus", "VARCHAR DEFAULT ''"),
         ("interview", "focus", "VARCHAR DEFAULT ''"),
+        # v3.5 具身智能体：默认配置下沉到数据库
+        ("avatarproviderconfig", "is_default", "BOOLEAN DEFAULT FALSE"),
     ]
 
     if is_sqlite:
@@ -95,6 +99,7 @@ def init_db():
     SQLModel.metadata.create_all(engine)
     _run_migrations()
     _seed_avatars()
+    _seed_avatar_config_from_env()
     _seed_algorithm_problems()
     _seed_knowledge_versions()
     _seed_user_quotas()
@@ -103,6 +108,46 @@ def init_db():
 def _seed_avatars():
     """不再预置 Avatar 表数据。具身交互智能体形象由 AvatarProviderConfig 管理。"""
     pass
+
+
+def _seed_avatar_config_from_env():
+    """一次性搬迁：把 .env 中的具身智能体凭证收编为数据库默认配置。
+
+    v3.5 起默认配置一律来自数据库（见 server/services/avatar_config_service.py），
+    AVATAR_APP_ID / AVATAR_APP_SECRET / AVATAR_GATEWAY_SERVER / AVATAR_DEFAULT_IMAGE
+    已退出运行时解析。这里仅在**首次初始化**时执行一次，避免升级后线上直接掉到
+    本地 Lottie 形象；用 data/.avatar_env_seeded 打标，之后即使用户在后台删光了
+    所有配置（主动降级 Lottie），重启也不会把 .env 里的旧凭证复活。
+    """
+    from server.models import AvatarProviderConfig
+    from server.services.crypto_service import encrypt
+
+    marker = settings.data_dir / ".avatar_env_seeded"
+    if marker.exists():
+        return
+
+    app_id = (settings.avatar_app_id or "").strip()
+    app_secret = (settings.avatar_app_secret or "").strip()
+
+    with Session(engine) as session:
+        if session.exec(select(AvatarProviderConfig)).first():
+            pass  # 表里已有配置（走的是后台维护），无需搬迁
+        elif app_id and app_secret:
+            session.add(AvatarProviderConfig(
+                name="默认具身交互智能体",
+                app_id=app_id,
+                app_secret=encrypt(app_secret),
+                gateway_server=(settings.avatar_gateway_server or "").strip()
+                or "https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session",
+                avatar_image=(settings.avatar_default_image or "").strip(),
+                is_active=True,
+                is_default=True,
+            ))
+            session.commit()
+            print("[migration] 已将 .env 具身智能体凭证搬迁为数据库默认配置")
+
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("done", encoding="utf-8")
 
 
 def get_session():

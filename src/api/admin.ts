@@ -47,6 +47,8 @@ export interface AvatarProviderConfigItem {
   gatewayServer: string
   avatarImage: string
   isActive: boolean
+  /** 是否为全站默认配置（互斥，全表至多一条） */
+  isDefault: boolean
 }
 
 export function getAvatarConfigs(): Promise<AvatarProviderConfigItem[]> {
@@ -78,7 +80,18 @@ export function deactivateAvatarConfig(id: number): Promise<void> {
   return client.post(`/admin/avatar-config/${id}/deactivate`)
 }
 
-export function deleteAvatarConfig(id: number): Promise<void> {
+/** 设为全站默认（互斥，立即生效，无需重启服务） */
+export function setDefaultAvatarConfig(id: number): Promise<{ ok: boolean; isDefault: boolean }> {
+  return client.post(`/admin/avatar-config/${id}/set-default`)
+}
+
+/** 取消默认身份，之后由后端自动从数据库中选择 */
+export function unsetDefaultAvatarConfig(id: number): Promise<{ ok: boolean; isDefault: boolean }> {
+  return client.post(`/admin/avatar-config/${id}/unset-default`)
+}
+
+/** 删除配置；后端会同时清空引用它的用户偏好 */
+export function deleteAvatarConfig(id: number): Promise<{ ok: boolean; clearedPreferences?: number }> {
   return client.delete(`/admin/avatar-config/${id}`)
 }
 

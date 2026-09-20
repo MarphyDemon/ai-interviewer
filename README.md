@@ -212,8 +212,7 @@ npm run dev
 | `EMBEDDING_API_KEY` | Embedding API Key | — |
 | `EMBEDDING_BASE_URL` | Embedding API 地址 | `https://api.siliconflow.cn/v1` |
 | `EMBEDDING_MODEL` | Embedding 模型 | `BAAI/bge-m3` |
-| `AVATAR_APP_ID` | 具身交互智能体 App ID | — |
-| `AVATAR_APP_SECRET` | 具身交互智能体 App Secret | — |
+| `AVATAR_PROXY_BASE_URL` | brain 代理地址（魔珐云端回调，需公网可达） | — |
 | `ADMIN_PASSWORD` | 管理员密码 | `admin123` |
 | `S3_ENDPOINT` | S3 兼容存储地址 (可选) | — |
 | `S3_ACCESS_KEY` | S3 Access Key | — |
@@ -246,7 +245,8 @@ npm run dev
 ```bash
 # 1) 配置凭证
 cp .env.example .env        # Windows: copy .env.example .env
-#    填入 LLM_API_KEY / EMBEDDING_API_KEY / AVATAR_APP_ID / AVATAR_APP_SECRET
+#    填入 LLM_API_KEY / EMBEDDING_API_KEY
+#    具身交互智能体凭证不在这里配置，启动后到「管理后台 → 具身交互智能体」维护
 
 # 2) 构建并启动（PostgreSQL + 后端 + 前端 Nginx）
 docker compose up -d --build
@@ -254,7 +254,7 @@ docker compose up -d --build
 
 **凭证从哪来**
 
-- 具身交互智能体（魔珐星云）：[官网注册](https://www.xingyun3d.com)，本赛题邀请码 `XJKA436Y6J`（注册即送 1000 积分）
+- 具身交互智能体（魔珐星云）：[官网注册](https://www.xingyun3d.com)，本赛题邀请码 `XJKA436Y6J`（注册即送 1000 积分）；拿到 App ID / App Secret 后到「管理后台 → 具身交互智能体」新增并设为默认
 - LLM：任选 OpenAI 兼容服务（DeepSeek / 阿里百炼 / 火山方舟等）
 - Embedding：硅基流动 `BAAI/bge-m3`（有免费额度）
 
@@ -291,7 +291,7 @@ OFFLINE_MODE=true docker compose up -d --build
 - PostgreSQL: `localhost:5432`
 - Ollama: `localhost:11434`（仅方式二）
 
-> 方式二、三下**无需任何云端 Key**；具身播报走魔珐云端 TTSA，未配置 `AVATAR_APP_ID` / `AVATAR_APP_SECRET` 时前端自动降级为 Lottie 形象 + 浏览器语音（Web Speech）。
+> 方式二、三下**无需任何云端 Key**；具身播报走魔珐云端 TTSA，凭证在「管理后台 → 具身交互智能体」中配置（存入数据库，即时生效）；未配置可用的具身智能体时前端自动降级为 Lottie 形象 + 浏览器语音（Web Speech）。
 
 > 首次构建需要联网拉取依赖：pip 走 `PIP_INDEX_URL`（默认阿里云镜像），npm 需能访问 `npmjs.org` 与 `npm.xmov.ai`（`@xmov/avatar` 所在源）。
 

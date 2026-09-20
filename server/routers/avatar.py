@@ -8,7 +8,11 @@ from sqlmodel import Session, select
 from server.config import settings
 from server.database import get_session
 from server.models import AvatarProviderConfig, ChatConversation, User
-from server.services.crypto_service import decrypt
+from server.services.avatar_config_service import (
+    avatar_config_payload,
+    resolve_avatar_config_for_user,
+    resolve_default_avatar_config,
+)
 from server.services.auth_service import get_current_user
 from server.services.common import get_active_llm_config
 from server.services.avatar_brain_service import (
@@ -34,28 +38,10 @@ async def get_avatar_config(
 ):
     """前端具身交互智能体 SDK 初始化配置。
 
-    优先使用用户选择的具身交互智能体配置，无则降级到 .env 默认配置。
+    解析顺序：用户偏好（记录仍需存在）→ 数据库默认配置 → 无。
+    无可用配置时返回 configured=False，前端降级为本地 Lottie 形象。
     """
-    # 1. 尝试用户偏好的具身交互智能体配置
-    if user.preferred_avatar_config_id:
-        cfg = session.get(AvatarProviderConfig, user.preferred_avatar_config_id)
-        if cfg:
-            return {
-                "appId": cfg.app_id,
-                "appSecret": decrypt(cfg.app_secret),
-                "gatewayServer": cfg.gateway_server,
-                "avatarImage": cfg.avatar_image or settings.avatar_default_image,
-                "asrConfig": {},
-            }
-
-    # 2. 降级到 .env 默认配置
-    return {
-        "appId": settings.avatar_app_id,
-        "appSecret": settings.avatar_app_secret,
-        "gatewayServer": settings.avatar_gateway_server,
-        "avatarImage": settings.avatar_default_image,
-        "asrConfig": {},
-    }
+    return avatar_config_payload(resolve_avatar_config_for_user(session, user))
 
 
 @router.get("/homepage-avatars")
@@ -63,35 +49,35 @@ async def get_homepage_avatars(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    """获取首页展示的所有具身交互智能体形象。
+    """首页形象列表。
 
-    包含：
-    1. .env 默认形象（始终展示，无配置时的 fallback）
-    2. 管理后台启用的（is_active=True）具身交互智能体配置
+    列表 = 管理后台启用（is_active=True）的配置；若当前默认配置未启用，
+    也一并带上（标 isDefault），避免"当前默认在首页看不到"。
     """
-    result = []
+    default_cfg = resolve_default_avatar_config(session)
 
-    # 1. .env 默认形象始终展示
-    result.append({
-        "id": None,
-        "name": "默认具身交互智能体",
-        "avatarImage": settings.avatar_default_image,
-        "isDefault": True,
-    })
-
-    # 2. 管理后台启用的配置（is_active 表示"首页展示"）
     active_configs = session.exec(
-        select(AvatarProviderConfig).where(AvatarProviderConfig.is_active == True)  # noqa: E712
+        select(AvatarProviderConfig)
+        .where(AvatarProviderConfig.is_active == True)  # noqa: E712
+        .order_by(AvatarProviderConfig.created_at.desc())
     ).all()
-    for cfg in active_configs:
-        result.append({
+
+    ordered: list[AvatarProviderConfig] = list(active_configs)
+    if default_cfg and all(c.id != default_cfg.id for c in ordered):
+        ordered.insert(0, default_cfg)
+
+    result = [
+        {
             "id": cfg.id,
             "name": cfg.name,
-            "avatarImage": cfg.avatar_image or settings.avatar_default_image,
-            "isDefault": False,
-        })
+            "avatarImage": cfg.avatar_image,
+            "isDefault": bool(default_cfg and cfg.id == default_cfg.id),
+            "isActive": cfg.is_active,
+        }
+        for cfg in ordered
+    ]
 
-    # 标记用户当前选择
+    # 标记用户当前选择：偏好命中该项；或未设置偏好且该项是默认
     preferred_id = user.preferred_avatar_config_id
     for item in result:
         item["isSelected"] = (
@@ -114,7 +100,7 @@ async def set_avatar_preference(
 ):
     """设置当前用户的偏好具身交互智能体形象。
 
-    avatarConfigId 为 None 时表示使用 .env 默认配置。
+    avatarConfigId 为 None 时表示使用数据库默认配置。
     """
     if req.avatarConfigId is not None:
         cfg = session.get(AvatarProviderConfig, req.avatarConfigId)

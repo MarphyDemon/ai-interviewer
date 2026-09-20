@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as adminApi from '@/api/admin'
 import type { AvatarProviderConfigItem, BrainVerifyResult } from '@/api/admin'
@@ -93,16 +93,35 @@ async function toggleAvatar(id: number, currentActive: boolean) {
   }
 }
 
-async function removeAvatarConfig(id: number) {
-  if (!confirm(t('admin.confirmDeleteAvatar'))) return
+async function toggleDefault(cfg: AvatarProviderConfigItem) {
   try {
-    await adminApi.deleteAvatarConfig(id)
-    if (editingAvatarId.value === id) resetAvatarForm()
+    if (cfg.isDefault) {
+      await adminApi.unsetDefaultAvatarConfig(cfg.id)
+    } else {
+      await adminApi.setDefaultAvatarConfig(cfg.id)
+    }
     await fetchAvatarConfigs()
   } catch (e: any) {
     alert(e.message)
   }
 }
+
+async function removeAvatarConfig(id: number) {
+  if (!confirm(t('admin.confirmDeleteAvatar'))) return
+  try {
+    const res = await adminApi.deleteAvatarConfig(id)
+    if (editingAvatarId.value === id) resetAvatarForm()
+    await fetchAvatarConfigs()
+    if (res?.clearedPreferences) {
+      alert(t('admin.preferenceCleared', { count: res.clearedPreferences }))
+    }
+  } catch (e: any) {
+    alert(e.message)
+  }
+}
+
+/** 是否已存在默认配置（用于提示"当前无默认，用户端会降级"） */
+const hasDefault = computed(() => avatarConfigs.value.some((c) => c.isDefault))
 
 // ---------- Brain Config 验证 ----------
 const verifyMessage = ref('你好，请做个自我介绍')
@@ -136,6 +155,14 @@ async function runVerify() {
         {{ editingAvatarId !== null ? t('common.cancel') : showAvatarAddForm ? t('common.cancel') : t('admin.addNew') }}
       </button>
     </div>
+
+    <p class="text-xs text-gray-400">{{ t('admin.defaultHint') }}</p>
+    <p
+      v-if="avatarConfigs.length > 0 && !hasDefault"
+      class="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700"
+    >
+      {{ t('admin.noDefaultHint') }}
+    </p>
 
     <div v-if="showAvatarAddForm" class="space-y-3 rounded-xl bg-primary-50/50 p-4">
       <input v-model="newAvatarName" :placeholder="t('admin.configName')" class="w-full rounded-lg border border-primary-200 bg-white px-3 py-2 text-sm focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100" />
@@ -191,6 +218,7 @@ async function runVerify() {
           <div class="min-w-0 flex-1">
             <p class="truncate font-medium text-gray-700">
               {{ cfg.name }}
+              <span v-if="cfg.isDefault" class="ml-2 rounded-full bg-primary-100 px-2 py-0.5 text-xs text-primary-700">{{ t('admin.defaultBadge') }}</span>
               <span v-if="cfg.isActive" class="ml-2 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">{{ t('admin.showOnHomepage') }}</span>
               <span v-else class="ml-2 rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-500">{{ t('admin.hideOnHomepage') }}</span>
             </p>
@@ -199,6 +227,12 @@ async function runVerify() {
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-1.5">
+          <button
+            @click="toggleDefault(cfg)"
+            class="rounded-lg bg-primary-50 px-3 py-1.5 text-xs text-primary-600 transition hover:bg-primary-100"
+          >
+            {{ cfg.isDefault ? t('admin.unsetDefault') : t('admin.setAsDefault') }}
+          </button>
           <button
             @click="startEditAvatar(cfg)"
             class="rounded-lg bg-gray-100 px-3 py-1.5 text-xs text-gray-600 transition hover:bg-gray-200"

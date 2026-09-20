@@ -15,6 +15,8 @@ import uuid
 os.environ["OFFLINE_MODE"] = "true"
 _TMP_DB = os.path.join(tempfile.mkdtemp(prefix="ai-interviewer-smoke-"), "app.db")
 os.environ["DATABASE_URL"] = f"sqlite:///{_TMP_DB}"
+# 同时隔离 data 目录：避免一次性搬迁标记（.avatar_env_seeded）写进仓库
+os.environ["DATA_DIR"] = os.path.dirname(_TMP_DB)
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -309,6 +311,87 @@ with DbSession(engine) as s:
     check("考察重点落到面试记录", interview2.focus == focus_text, str(interview2.focus))
     prompt = build_interviewer_prompt(s, interview2)
 check("面试 prompt 注入考察重点", focus_text in prompt, prompt[-400:])
+
+# ---------- 14. 具身智能体默认配置（DB 化，默认可热改） ----------
+admin_login = client.post("/api/admin/verify", json={"password": "admin123"})
+check("管理员登录", admin_login.status_code == 200, admin_login.text[:200])
+admin_hdr = auth(admin_login.json()["token"])
+
+# 清空既有配置：本地 server/.env 若仍有 AVATAR_APP_ID，init_db 会一次性搬迁出一条默认配置
+for existing in client.get("/api/admin/avatar-config", headers=admin_hdr).json():
+    client.delete(f"/api/admin/avatar-config/{existing['id']}", headers=admin_hdr)
+check("清空既有具身智能体配置", client.get("/api/admin/avatar-config", headers=admin_hdr).json() == [])
+
+
+def create_avatar_cfg(name, app_id):
+    return client.post(
+        "/api/admin/avatar-config",
+        headers=admin_hdr,
+        json={
+            "name": name,
+            "appId": app_id,
+            "appSecret": "secret-x",
+            "gatewayServer": "https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session",
+            "avatarImage": "",
+        },
+    )
+
+
+def avatar_row(cid):
+    rows = client.get("/api/admin/avatar-config", headers=admin_hdr).json()
+    return next((c for c in rows if c["id"] == cid), None)
+
+
+cfg_a = create_avatar_cfg(f"形象A-{suffix}", f"app-a-{suffix}")
+check("新增具身智能体配置", cfg_a.status_code == 200, cfg_a.text[:200])
+cfg_a_id = cfg_a.json()["id"]
+cfg_b = create_avatar_cfg(f"形象B-{suffix}", f"app-b-{suffix}")
+cfg_b_id = cfg_b.json()["id"]
+check("新建配置不带默认标记", avatar_row(cfg_a_id)["isDefault"] is False)
+
+set_a = client.post(f"/api/admin/avatar-config/{cfg_a_id}/set-default", headers=admin_hdr)
+check("设为默认", set_a.status_code == 200, set_a.text[:200])
+check("设为默认后自动启用", avatar_row(cfg_a_id)["isActive"] is True)
+
+client.post(f"/api/admin/avatar-config/{cfg_b_id}/set-default", headers=admin_hdr)
+check("默认互斥：新默认生效", avatar_row(cfg_b_id)["isDefault"] is True)
+check("默认互斥：旧默认失效", avatar_row(cfg_a_id)["isDefault"] is False)
+
+cfg_resp = client.get("/api/avatar/config", headers=auth(hr_token)).json()
+check(
+    "无偏好时生效的是默认配置",
+    cfg_resp.get("configured") is True and cfg_resp.get("appId") == f"app-b-{suffix}",
+    str(cfg_resp)[:200],
+)
+
+pref = client.put(
+    "/api/avatar/preference", headers=auth(hr_token), json={"avatarConfigId": cfg_a_id}
+)
+check("设置用户偏好形象", pref.status_code == 200, pref.text[:200])
+cfg_resp = client.get("/api/avatar/config", headers=auth(hr_token)).json()
+check("用户偏好优先于默认配置", cfg_resp.get("appId") == f"app-a-{suffix}", str(cfg_resp)[:200])
+
+del_a = client.delete(f"/api/admin/avatar-config/{cfg_a_id}", headers=admin_hdr)
+check("删除被用户引用的配置不报错", del_a.status_code == 200, del_a.text[:200])
+check("删除后清理用户偏好", del_a.json().get("clearedPreferences", 0) >= 1, del_a.text[:200])
+personal = client.get("/api/settings/personal", headers=auth(hr_token)).json()
+check("用户偏好已被置空", personal.get("preferredAvatarConfigId") is None, str(personal)[:200])
+
+unset = client.post(f"/api/admin/avatar-config/{cfg_b_id}/unset-default", headers=admin_hdr)
+check("取消默认", unset.status_code == 200 and unset.json()["isDefault"] is False, unset.text[:200])
+check(
+    "取消默认后自动回落到启用中的配置",
+    client.get("/api/avatar/config", headers=auth(hr_token)).json().get("configured") is True,
+)
+
+del_b = client.delete(f"/api/admin/avatar-config/{cfg_b_id}", headers=admin_hdr)
+check("删除最后一条配置", del_b.status_code == 200, del_b.text[:200])
+last = client.get("/api/avatar/config", headers=auth(hr_token)).json()
+check("无任何配置时 configured=False（前端降级 Lottie）", last.get("configured") is False, str(last)[:200])
+check(
+    "无配置时首页形象列表为空",
+    client.get("/api/avatar/homepage-avatars", headers=auth(hr_token)).json() == [],
+)
 
 print()
 if failures:

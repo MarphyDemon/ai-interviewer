@@ -25,6 +25,12 @@ export class DigitalAvatarProvider implements AvatarProvider {
     this.config = await getAvatarConfig()
     this.brainConfig = brainConfig ?? null
 
+    // 数据库中没有可用的具身智能体配置：直接抛错，交给 useAvatar 降级本地 Lottie，
+    // 避免用空凭证去做一次注定失败的 SDK 初始化。
+    if (!this.config.configured || !this.config.appId || !this.config.appSecret) {
+      throw new Error('具身交互智能体未配置，降级本地形象')
+    }
+
     const container = document.getElementById(containerId)
     if (!container) {
       throw new Error(`Container #${containerId} not found`)

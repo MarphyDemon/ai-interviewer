@@ -44,9 +44,7 @@ services:
         condition: service_healthy
     environment:
       - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ai_interviewer
-      - AVATAR_APP_ID=${AVATAR_APP_ID:-}
-      - AVATAR_APP_SECRET=${AVATAR_APP_SECRET:-}
-      - AVATAR_GATEWAY_SERVER=${AVATAR_GATEWAY_SERVER:-https://nebula-agent.xingyun3d.com/user/v1/ttsa_v2/session}
+      # 具身智能体凭证不再通过环境变量下发，改由「管理后台 → 具身交互智能体」维护（入库即时生效）
       - AVATAR_PROXY_BASE_URL=${AVATAR_PROXY_BASE_URL:-}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com}
       - LLM_API_KEY=${LLM_API_KEY:-}

@@ -245,6 +245,7 @@ async def list_avatar_configs(
             "gatewayServer": c.gateway_server,
             "avatarImage": c.avatar_image,
             "isActive": c.is_active,
+            "isDefault": c.is_default,
         }
         for c in configs
     ]
@@ -324,18 +325,73 @@ async def deactivate_avatar_config(
     return {"ok": True}
 
 
+@router.post("/avatar-config/{config_id}/set-default")
+async def set_default_avatar_config(
+    config_id: int,
+    session: Session = Depends(get_session),
+    _: str = Depends(require_admin_access),
+):
+    """把某条配置设为全站默认（互斥）。
+
+    同时置 is_active=True，保证默认配置在首页形象列表中可见可选。
+    改完立即生效，无需重启服务。
+    """
+    cfg = session.get(AvatarProviderConfig, config_id)
+    if not cfg:
+        raise HTTPException(404, "Config not found")
+
+    for other in session.exec(select(AvatarProviderConfig)).all():
+        other.is_default = other.id == config_id
+        session.add(other)
+    cfg.is_active = True
+    session.add(cfg)
+    session.commit()
+    return {"ok": True, "id": cfg.id, "isDefault": True}
+
+
+@router.post("/avatar-config/{config_id}/unset-default")
+async def unset_default_avatar_config(
+    config_id: int,
+    session: Session = Depends(get_session),
+    _: str = Depends(require_admin_access),
+):
+    """取消默认身份。之后由 resolve_default_avatar_config 自动选择。"""
+    cfg = session.get(AvatarProviderConfig, config_id)
+    if not cfg:
+        raise HTTPException(404, "Config not found")
+    cfg.is_default = False
+    session.add(cfg)
+    session.commit()
+    return {"ok": True, "id": cfg.id, "isDefault": False}
+
+
 @router.delete("/avatar-config/{config_id}")
 async def delete_avatar_config(
     config_id: int,
     session: Session = Depends(get_session),
     _: str = Depends(require_admin_access),
 ):
+    """删除配置。
+
+    先清空引用它的用户偏好（user.preferred_avatar_config_id），
+    否则 PostgreSQL 会因外键约束直接报错、SQLite 会留下悬空引用。
+    """
     cfg = session.get(AvatarProviderConfig, config_id)
     if not cfg:
         raise HTTPException(404, "Config not found")
+
+    affected_users = session.exec(
+        select(User).where(User.preferred_avatar_config_id == config_id)
+    ).all()
+    for u in affected_users:
+        u.preferred_avatar_config_id = None
+        session.add(u)
+    # 先把偏好置空的 UPDATE 落库，再删除主记录，避免 PostgreSQL 外键冲突
+    session.flush()
+
     session.delete(cfg)
     session.commit()
-    return {"ok": True}
+    return {"ok": True, "clearedPreferences": len(affected_users)}
 
 
 # ---------- 用户管理（P2 新增） ----------
