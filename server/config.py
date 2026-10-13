@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     # brain 代理地址（魔珐云端回调），与凭证无关，仍需配置
     avatar_proxy_base_url: str = ""
 
+    # ---------- ASR（具身交互智能体 SDK 的语音识别，可选）----------
+    # 凭证不再写死在前端源码中，由后端随 GET /api/avatar/config 的 asrConfig 字段下发。
+    # 留空（缺 access_token / app_id）时不下发，交由 SDK 使用自身默认 ASR 配置。
+    asr_provider: str = "doubao"
+    asr_base_url: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
+    asr_access_token: str = ""
+    asr_app_id: str = ""
+    asr_resource_id: str = "volc.bigasr.sauc.duration"
+
     llm_base_url: str = "https://api.deepseek.com"
     llm_api_key: str = ""
     llm_model: str = "deepseek-chat"

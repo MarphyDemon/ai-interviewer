@@ -46,6 +46,12 @@ services:
       - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ai_interviewer
       # 具身智能体凭证不再通过环境变量下发，改由「管理后台 → 具身交互智能体」维护（入库即时生效）
       - AVATAR_PROXY_BASE_URL=${AVATAR_PROXY_BASE_URL:-}
+      # ASR 语音识别凭证（可选）：由后端随 /api/avatar/config 下发给前端
+      - ASR_PROVIDER=${ASR_PROVIDER:-doubao}
+      - ASR_BASE_URL=${ASR_BASE_URL:-wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async}
+      - ASR_ACCESS_TOKEN=${ASR_ACCESS_TOKEN:-}
+      - ASR_APP_ID=${ASR_APP_ID:-}
+      - ASR_RESOURCE_ID=${ASR_RESOURCE_ID:-volc.bigasr.sauc.duration}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-deepseek-chat}

@@ -213,6 +213,9 @@ npm run dev
 | `EMBEDDING_BASE_URL` | Embedding API 地址 | `https://api.siliconflow.cn/v1` |
 | `EMBEDDING_MODEL` | Embedding 模型 | `BAAI/bge-m3` |
 | `AVATAR_PROXY_BASE_URL` | brain 代理地址（魔珐云端回调，需公网可达） | — |
+| `ASR_ACCESS_TOKEN` | 语音识别凭证（由后端下发给 SDK，不入源码） | — |
+| `ASR_APP_ID` | 语音识别应用 ID | — |
+| `ASR_PROVIDER` / `ASR_BASE_URL` / `ASR_RESOURCE_ID` | 语音识别服务参数（一般无需改） | `doubao` / 火山 bigmodel_async / `volc.bigasr.sauc.duration` |
 | `ADMIN_PASSWORD` | 管理员密码 | `admin123` |
 | `S3_ENDPOINT` | S3 兼容存储地址 (可选) | — |
 | `S3_ACCESS_KEY` | S3 Access Key | — |

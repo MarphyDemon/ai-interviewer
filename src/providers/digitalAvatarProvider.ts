@@ -66,26 +66,11 @@ export class DigitalAvatarProvider implements AvatarProvider {
         // 不接管会被静默丢弃。两套命名都注册，实测（Q7）后再精简。
         ...this.buildWidgetHandlers(),
       },
-      "asr_config": {
-        "provider": "doubao",
-        "base_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async",
-        "headers": {
-          "resource_id": "volc.bigasr.sauc.duration",
-          "access_token": "pWWHUQiZ7HzuwkFyOt9DjXYNaDFtpJLh",
-          "app_id": "6220573154"
-        },
-        "request": {
-          "enable_ddc": false,
-          "enable_itn": true,
-          "model_name": "bigmodel",
-          "enable_punc": true,
-          "result_type": "full",
-          "model_version": "400",
-          "end_window_size": 200,
-          "show_utterances": true,
-          "force_to_speech_time": 1000
-        }
-      },
+      // ASR 凭证由后端下发（GET /api/avatar/config → asrConfig），不再写死在源码里。
+      // 后端未配置时不下发，交由 SDK 使用自身默认 ASR。
+      ...(this.config.asrConfig && Object.keys(this.config.asrConfig).length > 0
+        ? { asr_config: this.config.asrConfig }
+        : {}),
       config: {
         init_events: [
           {

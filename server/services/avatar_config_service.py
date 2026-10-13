@@ -16,6 +16,7 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
+from server.config import settings
 from server.models import AvatarProviderConfig, User
 from server.services.crypto_service import decrypt
 
@@ -55,6 +56,35 @@ def resolve_avatar_config_for_user(
     return resolve_default_avatar_config(session)
 
 
+def _asr_config_payload() -> dict:
+    """SDK asr_config：凭证由后端下发，避免写死在打包产物里。
+
+    未配置（缺 access_token / app_id）时返回 {}，让 SDK 使用自身默认 ASR 配置。
+    """
+    if not settings.asr_access_token or not settings.asr_app_id:
+        return {}
+    return {
+        "provider": settings.asr_provider,
+        "base_url": settings.asr_base_url,
+        "headers": {
+            "resource_id": settings.asr_resource_id,
+            "access_token": settings.asr_access_token,
+            "app_id": settings.asr_app_id,
+        },
+        "request": {
+            "enable_ddc": False,
+            "enable_itn": True,
+            "model_name": "bigmodel",
+            "enable_punc": True,
+            "result_type": "full",
+            "model_version": "400",
+            "end_window_size": 200,
+            "show_utterances": True,
+            "force_to_speech_time": 1000,
+        },
+    }
+
+
 def avatar_config_payload(cfg: Optional[AvatarProviderConfig]) -> dict:
     """前端 SDK 初始化载荷。无可用配置时返回 configured=False，前端据此降级 Lottie。"""
     if cfg is None:
@@ -72,5 +102,5 @@ def avatar_config_payload(cfg: Optional[AvatarProviderConfig]) -> dict:
         "appSecret": decrypt(cfg.app_secret),
         "gatewayServer": cfg.gateway_server,
         "avatarImage": cfg.avatar_image,
-        "asrConfig": {},
+        "asrConfig": _asr_config_payload(),
     }
