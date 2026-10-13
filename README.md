@@ -1,264 +1,180 @@
-# 🎭 具身面试官
+# 🎭 具身面试官 · Embodied Interviewer
 
-> **具身面试官 / Embodied Interviewer** — 以 3D 具身交互智能体为交互界面、以 LLM + RAG 为大脑、以 Function Calling 为手脚的面试训练智能体。
+[![CI](https://github.com/MarphyDemon/ai-interviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/MarphyDemon/ai-interviewer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Vue 3](https://img.shields.io/badge/Vue-3-42b883)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688)
+![Docker Compose](https://img.shields.io/badge/Docker%20Compose-ready-2496ED)
+
+> **以 3D 具身交互智能体为交互界面、以 LLM + RAG 为大脑、以 Function Calling 为手脚的面试训练智能体。**
 >
-> 用户上传简历、选择岗位方向，由具身交互智能体面试官按题库知识点和简历内容进行语音/文字问答，结束后输出多维度点评报告。
+> 用户上传简历、选择岗位方向，由具身交互智能体面试官按题库知识点与简历内容进行语音问答；面试全程由显式状态机编排、可被中途打断，结束后输出多维度点评报告。
 
----
+具身交互能力基于 [魔珐星云](https://www.xingyun3d.com) `@xmov/avatar` SDK 构建。
 
-## ✨ 核心特性
+**直达入口：**[快速开始](#quickstart) · [演示视频](#demo) · [系统架构](#architecture) · [能力边界](#limits)
 
-- 🎭 **具身交互智能体面试官** — 3D 具身交互智能体形象 + 语音交互，贴近真实面试场景（支持 WebGL 硬件加速 / Lottie 动画降级）
-- 📚 **知识驱动出题** — Markdown 题库 + RAG 检索，AI 基于知识点自主生成题目与参考答案
-- 📄 **简历针对性** — PDF/Word 简历解析，AI 基于简历内容进行针对性追问和人岗匹配评估
-- 💬 **语音优先交互** — 麦克风录音 → ASR 转文字 → AI 追问 → TTS 语音播报，支持文字输入兜底
-- 📊 **多维度评估** — 雷达图评分（技术深度、表达力、逻辑性、人岗匹配）+ 逐题点评 + PDF 报告导出
-- 💻 **代码练习** — 内置算法练习模块，支持在线编码与自动判题（Piston API）
-- 📱 **跨端支持** — Web / iOS / Android（Capacitor）/ 微信小程序 四端统一
-- 🏢 **企业候选人初筛** — HR 发邀请链接，候选人免注册作答，控制台按报告总分横向排名
+***
 
----
+<a id="demo"></a>
 
-## 🎯 两种使用方式
+## 🎬 演示视频
 
-同一套面试引擎同时支撑两种场景，二者数据互相隔离。
+> 🎬 **3\~5 分钟端到端录屏**：待录制，占位待补。
+>
+> 录制完成后，把视频链接（或 `docs/demo.mp4`）替换到此处。
 
-### 个人练习（默认）
+***
 
-注册后自行配置岗位 / 难度 / 时长并开始面试，结束后查看多维度报告、历史记录与跨场次薄弱点画像。
+## ✨ 核心能力
 
-### 企业候选人初筛
+能力按 **表达 · 交互 · 行动** 三层组织——分别对应「能说话/有形象」「有状态/有记忆」「能动手调工具」。
 
-HR 在「企业控制台」创建邀请链接，候选人打开链接填姓名即可作答（**无需注册**），HR 在控制台横向对比同一岗位下的候选人：
+### 表达层 · 会说话、有形象
 
-```
-HR：企业控制台 /org
-     └─ 创建邀请（岗位 / 难度 / 时长 / 可选 JD / 考察重点）→ 得到链接 /invite/{token}
-候选人：打开链接 → 填姓名 → 直接进入面试
-HR：控制台查看候选人排名（按报告总分倒序）→ 点开某人的报告
-```
+- **具身交互智能体**：`@xmov/avatar` Agent 模式，WebGL2 端侧渲染，口型 / 表情 / 关键动作随语义驱动
+- **语音优先**：麦克风 → ASR → LLM → TTS 播报，字幕与语音同步；文字输入兜底
+- **多级降级**：WebGL 硬件加速 → Lottie 形象 + 浏览器语音（Web Speech），弱环境仍可用
 
-控制台同时维护**组织共享资源**：组织 JD 库（`scope=org` 的 JD，全组织可选）与企业知识库（`scope=org` 的知识文档，进入本组织面试的 RAG 检索）。两类资源的可见性以数据库归属为准，组织外用户不可见、检索也不会跨用户串检。
+### 交互层 · 有状态、有记忆、可打断
 
-权限边界：
+- **面试流程状态机**：`opening → ask ⇄ followup → algorithm → judge → closing → report → finished`，带合法转移约束，防止 LLM 乱跳流程
+- **跨会话记忆**：历史面试沉淀为薄弱点画像，供后续出题与点评引用
+- **富交互 Widget**：题目卡 / 评分 / 匹配度 / 简历高亮 / 确定性 Picker 等，由播报指令驱动挂载
+- **实时打断**：用户开口即打断当前播报并转向新问题
 
-| 角色 | 能做什么 |
-| --- | --- |
-| 候选人 | 只能作答并查看被邀请的那一场面试 |
-| owner / HR | 只读本组织候选人的面试与报告；可发邀请、加成员、撤销邀请；可管理组织 JD 库与企业知识库 |
-| viewer | 只读本组织候选人的面试与报告、组织 JD 与知识库（不可增删） |
-| 普通用户 | 只能看自己的面试与报告（与未引入企业侧时完全一致） |
-| admin | 可读全部 |
+### 行动层 · 能动手调工具
 
-实现说明：候选人落库为 `role="candidate"` 的**无密码用户**（`username` / `password_hash` 均为空，无法登录），因此状态机、具身播报、报告、录音、实测指标全部复用个人练习链路，企业侧只新增「组织 / 邀请 / 候选人归属」三层关系，见 [server/services/org_service.py](server/services/org_service.py)。
+- **Function Calling**：12 个工具（出题 / 简历解析 / 知识检索 / 代码判题 / 报告生成 / 情绪与动作 …）
+- **MCP 工具接入**：自实现 stdio JSON-RPC 客户端，`mcp_*` 前缀转发，见[《MCP 接入方案》](docs/MCP接入方案.md)
+- **知识驱动出题**：Markdown 题库 + ChromaDB 向量检索，按知识点自主生成题目与参考答案
+- **简历 + 人岗匹配**：PDF / Word 解析，基于简历针对性追问并给出匹配度评估
+- **在线编程 + 自动判题**：[Judge0 CE](https://ce.judge0.com) 公共 API，多语言在线运行
+- **多维度报告**：雷达图评分（技术深度 / 表达力 / 逻辑性 / 人岗匹配）+ 逐题点评 + PDF 导出
 
----
+### 场景与形态
 
-## 🏗️ 技术栈
+- **两种使用方式**：个人练习（默认）与企业候选人初筛（HR 发邀请链接，候选人免注册作答），二者数据隔离
+- **四端统一**：Web / iOS / Android（Capacitor）/ 微信小程序
 
-| 层级 | 技术 |
-|------|------|
-| 前端框架 | Vue 3 + TypeScript + Vite 6 |
-| 状态管理 | Pinia |
-| UI 样式 | TailwindCSS + HeadlessUI |
-| 路由 | Vue Router 4 |
-| 国际化 | vue-i18n (中/英) |
-| 代码编辑器 | Monaco Editor |
-| 具身交互智能体 SDK | @xmov/avatar |
-| 动画降级 | vue3-lottie |
-| 后端框架 | FastAPI + Uvicorn |
-| ORM | SQLModel (SQLAlchemy) |
-| 数据库 | PostgreSQL 16 / SQLite (默认) |
-| 向量库 | ChromaDB |
-| LLM | Deepseek / 兼容 OpenAI API |
-| Embedding | SiliconFlow BAAI/bge-m3 |
-| 部署 | Docker Compose |
-| 跨端 | Capacitor 7 (iOS/Android) |
+***
 
----
+<a id="architecture"></a>
 
-## 📁 项目结构
+## 🏗️ 系统架构
 
-```
-embodied-interviewer/
-├── src/                        # 前端源码 (Vue 3 + TypeScript)
-│   ├── api/                    # API 请求模块
-│   ├── components/             # 公共组件
-│   │   ├── common/             # 导航、TabBar 等
-│   │   └── DeviceCheckModal.vue
-│   ├── composables/            # 组合式函数
-│   │   ├── useAvatar.ts        # 具身交互智能体面试官管理
-│   │   ├── useDevice.ts        # 设备检测
-│   │   ├── useMobile.ts        # 移动端工具
-│   │   ├── useMediaDevices.ts  # 摄像头/麦克风
-│   │   └── useMediaRecorder.ts # 录音
-│   ├── i18n/                   # 国际化 (中/英)
-│   ├── router/                 # 路由配置
-│   ├── stores/                 # Pinia 状态
-│   ├── views/                  # 页面视图
-│   ├── utils/                  # 工具函数
-│   ├── App.vue                 # 根组件
-│   └── main.ts                 # 入口
-├── server/                     # 后端源码 (FastAPI)
-│   ├── routers/                # API 路由
-│   │   ├── auth.py             # 认证 (登录/注册)
-│   │   ├── interview.py        # 面试核心
-│   │   ├── report.py           # 报告生成
-│   │   ├── knowledge.py        # 题库管理
-│   │   ├── resume.py           # 简历解析
-│   │   ├── code.py             # 代码练习
-│   │   ├── recordings.py       # 录制回放
-│   │   └── ...
-│   ├── services/               # 业务服务
-│   │   ├── interview_service.py
-│   │   ├── judge_service.py    # 代码判题
-│   │   ├── pdf_service.py      # PDF 生成
-│   │   └── ...
-│   ├── config.py               # 配置 (基于 pydantic-settings)
-│   ├── database.py             # 数据库初始化
-│   └── main.py                 # FastAPI 入口
-├── pg/                         # 内置 PostgreSQL 安装包 (Windows)
-├── miniprogram/                # 微信小程序壳工程
-├── public/                     # 静态资源
-├── data/                       # 运行时数据 (上传文件、录屏等)
-├── docs/                       # 项目文档
-├── Dockerfile                  # 后端 Docker 镜像
-├── Dockerfile.frontend         # 前端 Docker 镜像 (Vite 构建 + Nginx)
-├── docker-compose.yml          # 一键启动编排 (Postgres + Backend + Frontend)
-├── docker-compose.dev.yml      # 开发模式编排 (源码挂载 + 热更新)
-├── capacitor.config.ts         # Capacitor 配置
-├── vite.config.ts              # Vite 配置
-├── package.json                # 前端依赖
-├── server/requirements.txt     # 后端依赖
-└── install_postgresql.bat      # Windows 一键安装 PostgreSQL
+```mermaid
+flowchart LR
+    client["浏览器 / 移动端 / 小程序"] -->|HTTPS| web["Nginx / Vite"]
+    web -->|/api、/v1| api["FastAPI 后端"]
+    client <-->|WebGL2 渲染| avatar["魔珐星云 @xmov/avatar"]
+    avatar -.->|brain_config 回调| api
+    api --> db[("PostgreSQL / SQLite")]
+    api --> vec[("ChromaDB 向量库")]
+    api --> llm["LLM（OpenAI 兼容）"]
+    api --> emb["Embedding（bge-m3）"]
+    api --> judge["Judge0 CE 判题"]
+    avatar -->|TTSA 播报| cloud["魔珐云端"]
 ```
 
----
+面试编排由显式状态机驱动，阶段变化同时**落库**（`interview.stage`）并广播 **SSE** **`stage`** **事件**，前端步骤条与后端状态始终一致：
+
+```mermaid
+stateDiagram-v2
+    [*] --> opening
+    opening --> ask
+    ask --> followup
+    followup --> ask
+    ask --> algorithm
+    algorithm --> judge
+    judge --> ask
+    ask --> closing
+    closing --> report
+    report --> finished
+    finished --> [*]
+```
+
+> SSE 事件总线（`/api/interview/{id}/events`）另有 `tool_start` / `tool_result` / `widget` / `emotion` / `metrics` 等事件，用于驱动前端工具栏与实时指标。
+
+技术栈：
+
+| 层级   | 技术                                                                                       |
+| ---- | ---------------------------------------------------------------------------------------- |
+| 前端   | Vue 3 + TypeScript + Vite 6 · Pinia · Vue Router 4 · TailwindCSS + HeadlessUI · vue-i18n |
+| 具身交互 | `@xmov/avatar`（Agent 模式）· vue3-lottie（降级）                                                |
+| 后端   | FastAPI + Uvicorn · SQLModel (SQLAlchemy) · pydantic-settings                            |
+| 数据   | PostgreSQL 16 / SQLite（默认）· ChromaDB                                                     |
+| 模型   | LLM（Deepseek / 任意 OpenAI 兼容）· Embedding（硅基流动 `BAAI/bge-m3`）                              |
+| 判题   | Judge0 CE 公共 API（可自托管）                                                                   |
+| 部署   | Docker Compose · Capacitor 7（iOS/Android）                                                |
+
+***
+
+<a id="quickstart"></a>
 
 ## 🚀 快速开始
 
-### 环境要求
+### 前置要求
 
-- **Node.js** >= 20
-- **Python** >= 3.12
-- **PostgreSQL** 16+（可选，默认使用 SQLite）
-- **Docker** 24+（可选，容器化部署）
+| 方式            | 需要                             |
+| ------------- | ------------------------------ |
+| Docker 一键（推荐） | Docker 24+ / Docker Compose v2 |
+| 本地源码开发        | Node.js ≥ 20 · Python ≥ 3.12   |
 
-### 1. 克隆项目
-
-```bash
-git clone <repo-url> embodied-interviewer
-cd embodied-interviewer
-```
-
-### 2. 后端启动
+### Docker 一键启动（约 5 分钟）
 
 ```bash
-# 进入后端目录
-cd server
-
-# 创建虚拟环境
-python -m venv .venv
-.venv\Scripts\activate      # Windows
-# source .venv/bin/activate  # macOS/Linux
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 创建 .env 配置文件
-copy .env.example .env
-# 编辑 .env，填入 API Key 等配置
-
-# 启动服务
-uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-后端服务启动于 `http://localhost:8000`
-
-### 3. 前端启动
-
-```bash
-# 回到项目根目录
-cd ..
-
-# 安装依赖
-npm install
-
-# 开发模式启动
-npm run dev
-```
-
-前端服务启动于 `http://localhost:5173`，自动代理 `/api` 到后端 `localhost:8000`
-
-### 4. 访问应用
-
-打开浏览器访问 `http://localhost:5173`
-
----
-
-## ⚙️ 配置说明
-
-> 本地源码启动 / Docker 开发模式读取 `server/.env`（模板 `server/.env.example`）；
-> Docker 一键启动读取根目录 `.env`（模板 `.env.example`）。两处变量名一致。
-
-### 后端环境变量 (`server/.env`)
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DATABASE_URL` | 数据库连接串 | `sqlite:///data/app.db` |
-| `LLM_BASE_URL` | LLM API 地址 | `https://api.deepseek.com` |
-| `LLM_API_KEY` | LLM API Key | — |
-| `LLM_MODEL` | LLM 模型名称 | `deepseek-chat` |
-| `EMBEDDING_API_KEY` | Embedding API Key | — |
-| `EMBEDDING_BASE_URL` | Embedding API 地址 | `https://api.siliconflow.cn/v1` |
-| `EMBEDDING_MODEL` | Embedding 模型 | `BAAI/bge-m3` |
-| `AVATAR_PROXY_BASE_URL` | brain 代理地址（魔珐云端回调，需公网可达） | — |
-| `ASR_ACCESS_TOKEN` | 语音识别凭证（由后端下发给 SDK，不入源码） | — |
-| `ASR_APP_ID` | 语音识别应用 ID | — |
-| `ASR_PROVIDER` / `ASR_BASE_URL` / `ASR_RESOURCE_ID` | 语音识别服务参数（一般无需改） | `doubao` / 火山 bigmodel_async / `volc.bigasr.sauc.duration` |
-| `ADMIN_PASSWORD` | 管理员密码 | `admin123` |
-| `S3_ENDPOINT` | S3 兼容存储地址 (可选) | — |
-| `S3_ACCESS_KEY` | S3 Access Key | — |
-| `S3_SECRET_KEY` | S3 Secret Key | — |
-| `S3_BUCKET` | S3 Bucket | `ai-interviewer` |
-| `ENCRYPTION_KEY` | 加密密钥 | `change-me-in-production-32bytes!!` |
-
-### 前端构建模式
-
-| 命令 | 模式 | 环境文件 | 说明 |
-|------|------|----------|------|
-| `npm run build:web` | Web | `.env.web` | 普通网页部署 |
-| `npm run build:capacitor` | 移动 App | `.env.capacitor` | iOS/Android 打包 |
-| `npm run build:miniprogram` | 小程序 | `.env.miniprogram` | 微信小程序嵌入 |
-
----
-
-## 🐳 Docker 部署
-
-提供三种运行方式，按"是否需要凭证 / 是否需要下载模型"选择：
-
-| 方式 | 需要什么 | 出题与点评 | 具身播报 | 首次启动 |
-|---|---|---|---|---|
-| **一、云端凭证** | LLM / Embedding / 魔珐凭证 | 云端大模型（质量最好） | ✅ 口型 / 表情 / 关键动作 | 构建镜像 |
-| **二、本地大模型** | 无需任何凭证 | 本地 Ollama（qwen2.5:3b） | ⚠️ 降级为 Lottie + 浏览器语音 | 下载约 2.5GB 模型 |
-| **三、离线规则** | 无需凭证、无需下载 | 内置题库 + 规则模板（非大模型） | ⚠️ 同上 | 秒级 |
-
-### 方式一：云端凭证（功能最全）
-
-```bash
-# 1) 配置凭证
-cp .env.example .env        # Windows: copy .env.example .env
+# 1) 准备凭证模板（留空也能启动，仅 AI 能力不可用）
+cp .env.example .env          # Windows: copy .env.example .env
 #    填入 LLM_API_KEY / EMBEDDING_API_KEY
-#    具身交互智能体凭证不在这里配置，启动后到「管理后台 → 具身交互智能体」维护
 
 # 2) 构建并启动（PostgreSQL + 后端 + 前端 Nginx）
 docker compose up -d --build
 ```
 
+启动后访问 **<http://localhost:8080>**（端口由 `APP_PORT` 控制）。
+
+> 具身智能体（魔珐星云）凭证**不在** **`.env`** **里配**，启动后到「管理后台 → 具身交互智能体」维护，存入数据库即时生效；未配置可用智能体时前端自动降级为 Lottie 形象 + 浏览器语音。
+
+### 本地源码开发
+
+```bash
+# 后端
+cd server
+python -m venv .venv
+.venv\Scripts\activate          # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+copy .env.example .env          # 编辑并填入 API Key
+uvicorn server.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 前端（另开终端，回到仓库根目录）
+npm install
+npm run dev                     # http://localhost:5173，/api 自动代理到 :8000
+```
+
+***
+
+## 🐳 Docker 三种运行方式
+
+按「是否需要凭证 / 是否需要下载模型」选择，**推荐云端凭证（能力最全）**：
+
+| 方式             | 需要什么                   | 出题与点评                   | 具身播报                  | 首次启动         |
+| -------------- | ---------------------- | ----------------------- | --------------------- | ------------ |
+| **一、云端凭证（推荐）** | LLM / Embedding / 魔珐凭证 | 云端大模型（质量最好）             | ✅ 口型 / 表情 / 关键动作      | 构建镜像         |
+| 二、本地大模型        | 无需任何凭证                 | 本地 Ollama（`qwen2.5:3b`） | ⚠️ 降级为 Lottie + 浏览器语音 | 下载约 2.5GB 模型 |
+| 三、离线规则（兜底）     | 无需凭证、无需下载              | 内置题库 + 规则模板（**非大模型**）   | ⚠️ 同上                 | 秒级           |
+
+### 方式一：云端凭证（功能最全）
+
+```bash
+cp .env.example .env            # 填入 LLM_API_KEY / EMBEDDING_API_KEY
+docker compose up -d --build
+```
+
 **凭证从哪来**
 
-- 具身交互智能体（魔珐星云）：[官网注册](https://www.xingyun3d.com)，本赛题邀请码 `XJKA436Y6J`（注册即送 1000 积分）；拿到 App ID / App Secret 后到「管理后台 → 具身交互智能体」新增并设为默认
-- LLM：任选 OpenAI 兼容服务（DeepSeek / 阿里百炼 / 火山方舟等）
+- 具身智能体（魔珐星云）：[官网注册](https://www.xingyun3d.com) → 「管理后台 → 具身交互智能体」新增并设为默认
+- LLM：任选 OpenAI 兼容服务（DeepSeek / 阿里百炼 / 火山方舟 …）
 - Embedding：硅基流动 `BAAI/bge-m3`（有免费额度）
 
 ### 方式二：本地大模型（无凭证，AI 链路完整）
@@ -267,36 +183,21 @@ docker compose up -d --build
 docker compose -f docker-compose.yml -f docker-compose.local-llm.yml up -d --build
 ```
 
-额外启动 [Ollama](https://ollama.com) 并拉取两个模型（模型就绪后才启动后端）：
+额外启动 [Ollama](https://ollama.com) 并拉取两个模型（就绪后后端才启动）：
 
-| 用途 | 模型 |
-|---|---|
-| 面试官大脑（LLM） | `qwen2.5:3b`（可用 `LOCAL_LLM_MODEL=qwen2.5:7b` 换更大的） |
-| 题库向量化（Embedding） | `bge-m3`（1024 维，与云端 bge-m3 一致） |
+| 用途               | 模型                                                |
+| ---------------- | ------------------------------------------------- |
+| 面试官大脑（LLM）       | `qwen2.5:3b`（可用 `LOCAL_LLM_MODEL=qwen2.5:7b` 换更大） |
+| 题库向量化（Embedding） | `bge-m3`（1024 维，与云端一致）                            |
 
-> 下载慢或不想下载模型时，请用方式三。
-
-### 方式三：离线规则模式（零依赖，秒级启动）
+### 方式三：离线规则（零依赖兜底）
 
 ```bash
 OFFLINE_MODE=true docker compose up -d --build
 # Windows PowerShell: $env:OFFLINE_MODE="true"; docker compose up -d --build
 ```
 
-不调用任何模型，用**内置题库 + 规则模板**驱动"出题 → 追问 → 算法题 → 判题 → 报告"全流程；知识库检索退化为关键词匹配。判题仍走真实 Judge0 CE（公网 API）。
-
-> 该模式**不是大模型**：出题来自题库，点评由"回答长度 / 技术关键词覆盖 / 表达结构"等可解释规则计算，页面顶部会显示模式提示条。适合评审在无网络、无凭证环境下快速验证端到端流程。
-
-启动后（三种方式一致）：
-
-- 前端: `http://localhost:8080`（端口可用 `APP_PORT` 修改）
-- 后端: `http://localhost:8000`
-- PostgreSQL: `localhost:5432`
-- Ollama: `localhost:11434`（仅方式二）
-
-> 方式二、三下**无需任何云端 Key**；具身播报走魔珐云端 TTSA，凭证在「管理后台 → 具身交互智能体」中配置（存入数据库，即时生效）；未配置可用的具身智能体时前端自动降级为 Lottie 形象 + 浏览器语音（Web Speech）。
-
-> 首次构建需要联网拉取依赖：pip 走 `PIP_INDEX_URL`（默认阿里云镜像），npm 需能访问 `npmjs.org` 与 `npm.xmov.ai`（`@xmov/avatar` 所在源）。
+不调用任何模型：出题来自内置题库、点评由可解释规则计算、检索退化为关键词匹配；判题仍走真实 Judge0 CE。适合无网络 / 无凭证环境快速验证端到端流程，**不等同于大模型能力**。
 
 ### 开发模式（源码挂载 + 热更新）
 
@@ -305,122 +206,162 @@ cp server/.env.example server/.env    # 按需填写，可留空
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-前端 `http://localhost:5173`，后端 `http://localhost:8000`（`--reload`，改动即生效）。
+前端 `http://localhost:5173`，后端 `http://localhost:8000`（`--reload`）。
 
 ### 常用命令
 
 ```bash
 docker compose logs -f backend        # 查看日志
 docker compose ps                     # 查看状态
-docker compose down                   # 停止 (保留数据)
+docker compose down                   # 停止（保留数据）
 docker compose down -v                # 停止并删除数据卷
 ```
 
----
+> 首次构建需联网拉取依赖：pip 走 `PIP_INDEX_URL`（默认阿里云镜像），npm 需能访问 `npmjs.org` 与 `npm.xmov.ai`（`@xmov/avatar` 所在源）。生产部署见[《部署手册》](docs/部署手册.md)（含 `docker-compose.prod.yml`、一键 `deploy.sh` 与迭代升级说明）。
 
-## 📱 移动端集成
+***
 
-### Capacitor (iOS / Android)
+## ⚙️ 配置说明
 
-```bash
-# 安装 Capacitor CLI
-npm install @capacitor/cli --save-dev
+> 本地源码启动 / Docker 开发模式读取 `server/.env`（模板 `server/.env.example`）；
+> Docker 一键启动读取根目录 `.env`（模板 `.env.example`）。两处变量名一致。
 
-# 初始化 (首次)
-npx cap init "AI面试官" "com.aiinterviewer.app"
+### 后端环境变量（`server/.env`）
 
-# 添加平台
-npm install @capacitor/android @capacitor/ios
-npx cap add android
-npx cap add ios
+| 变量                                                              | 说明                                 | 默认值                                                          |
+| --------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------ |
+| `DATABASE_URL`                                                  | 数据库连接串                             | `sqlite:///data/app.db`                                      |
+| `LLM_BASE_URL`                                                  | LLM API 地址                         | `https://api.deepseek.com`                                   |
+| `LLM_API_KEY`                                                   | LLM API Key                        | —                                                            |
+| `LLM_MODEL`                                                     | LLM 模型名称                           | `deepseek-chat`                                              |
+| `EMBEDDING_API_KEY`                                             | Embedding API Key                  | —                                                            |
+| `EMBEDDING_BASE_URL`                                            | Embedding API 地址                   | `https://api.siliconflow.cn/v1`                              |
+| `EMBEDDING_MODEL`                                               | Embedding 模型                       | `BAAI/bge-m3`                                                |
+| `EMBEDDING_PROVIDER`                                            | Embedding 提供方（`openai` / `ollama`） | `openai`                                                     |
+| `AVATAR_PROXY_BASE_URL`                                         | brain 代理地址（魔珐云端回调，**需公网可达**）       | —                                                            |
+| `ASR_ACCESS_TOKEN` / `ASR_APP_ID`                               | 语音识别凭证（由后端下发给 SDK，**不入源码**）        | —                                                            |
+| `ASR_PROVIDER` / `ASR_BASE_URL` / `ASR_RESOURCE_ID`             | 语音识别服务参数（一般无需改）                    | `doubao` / 火山 `bigmodel_async` / `volc.bigasr.sauc.duration` |
+| `OFFLINE_MODE`                                                  | 离线规则模式开关                           | `false`                                                      |
+| `INTERVIEW_SSML_INJECT`                                         | 播报是否允许注入 SSML 动作/控件标签（待验证项）        | `false`                                                      |
+| `ADMIN_PASSWORD`                                                | 管理后台口令                             | `admin123`                                                   |
+| `ENCRYPTION_KEY`                                                | 敏感配置加密密钥（32 字节，**生产务必替换**）         | `change-me-in-production-32bytes!!`                          |
+| `S3_ENDPOINT` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_BUCKET` | S3 兼容对象存储（可选，不设则本地存储）              | — / `ai-interviewer`                                         |
 
-# 构建前端 (capacitor 模式)
-npm run build:capacitor
+> 具身智能体服务凭证（App ID / App Secret / Gateway）自 v3.5 起**已下沉数据库**，不再通过环境变量下发，请在管理后台维护。
 
-# 同步到原生项目
-npx cap sync
+### 前端构建模式
 
-# 打开 Xcode / Android Studio
-npx cap open ios
-npx cap open android
+| 命令                          | 模式     | 环境文件               | 说明             |
+| --------------------------- | ------ | ------------------ | -------------- |
+| `npm run build:web`         | Web    | `.env.web`         | 普通网页部署         |
+| `npm run build:capacitor`   | 移动 App | `.env.capacitor`   | iOS/Android 打包 |
+| `npm run build:miniprogram` | 小程序    | `.env.miniprogram` | 微信小程序嵌入        |
 
-# 开发调试
-npm run dev:capacitor   # 本地调试模式，允许 App 连接 localhost
+***
+
+## 📁 项目结构
+
+```
+embodied-interviewer/
+├── src/                         # 前端源码（Vue 3 + TypeScript）
+│   ├── api/                     # 接口封装（axios）
+│   ├── components/              # 组件（admin / common / interview / knowledge）
+│   ├── composables/             # 组合式函数（useAvatar / useASR / useInterviewEvents …）
+│   ├── providers/               # 具身 / ASR / TTS 多实现（云端 ↔ 本地降级）
+│   ├── stores/                  # Pinia 状态
+│   ├── views/                   # 页面（面试 / 报告 / 企业控制台 / 管理后台 …）
+│   └── i18n/                    # 中英文案
+├── server/                      # 后端源码（FastAPI）
+│   ├── routers/                 # 路由层（interview / report / org / jd / avatar / admin …）
+│   ├── services/                # 业务层（状态机 / RAG / 工具调用 / MCP / 判题 / 报告 …）
+│   ├── parsers/                 # 简历解析（PDF / DOCX / Markdown）
+│   ├── mcp_servers/             # 内置示例 MCP Server
+│   ├── tests/                   # pytest 用例
+│   ├── config.py                # 配置（pydantic-settings）
+│   └── main.py                  # 应用入口
+├── miniprogram/                 # 微信小程序壳工程
+├── deploy/                      # Nginx 配置与部署脚本
+├── docs/                        # 项目文档
+├── dist/                        # 前端构建产物（部署用，构建生成）
+├── Dockerfile                   # 后端镜像
+├── Dockerfile.frontend          # 前端镜像（Vite 构建 + Nginx）
+├── docker-compose.yml           # 一键编排（PostgreSQL + 后端 + 前端）
+├── docker-compose.local-llm.yml # 叠加：本地 Ollama 模型
+├── docker-compose.prod.yml      # 生产编排
+├── docker-compose.dev.yml       # 开发编排（源码挂载 + 热更新）
+├── .github/workflows/ci.yml     # CI：eslint + vue-tsc + build + ruff
+└── LICENSE                      # MIT
 ```
 
-### 微信小程序
+***
+
+## 🧪 开发与自测
 
 ```bash
-# 1. 用微信开发者工具打开 miniprogram/ 目录
-# 2. 修改 miniprogram/app.js 中的 webViewUrl 为已部署的 H5 地址
-# 3. 在微信开发者工具中上传小程序代码
-# 4. 提交审核发布
+npm run lint          # ESLint（TS + Vue，--max-warnings 0）
+npm run typecheck     # vue-tsc 类型检查
+npm run build:web     # 生产构建（Web 模式）
+ruff check server     # 后端静态检查
 ```
 
-小程序壳使用 `<web-view>` 嵌入 H5 页面，通过 JSSI（`evalJS` / `postMessage`）实现双向通信：
+以上四项即 CI（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）内容。后端另有 pytest 用例（`server/tests/`）与冒烟脚本（`scripts/smoke_org_flow.py`），尚未接入 CI。
 
-| 方向 | 方式 | 场景 |
-|------|------|------|
-| 小程序 → H5 | `evalJS` 调用 `window.__onMiniMessage` | 实时消息（如分享回调） |
-| H5 → 小程序 | `wx.miniProgram.navigateBack` 等 | 关闭页面、返回上一页 |
-| H5 → 小程序 | URL hash `#/mp-action?action=xxx` | 触发小程序原生能力 |
+### 数据库
 
----
-
-## 🗄️ 数据库
-
-### 内置 PostgreSQL (Windows)
-
-项目已内置 PostgreSQL 16 安装包至 `pg/` 目录。
+不配置 `DATABASE_URL` 时默认使用 **SQLite**（零安装）。切换到 PostgreSQL：
 
 ```bash
-# 一键安装 (需管理员权限)
+# Windows 可选脚本（自动下载并静默安装 PostgreSQL 16，需管理员权限）
 install_postgresql.bat
-```
-
-安装完成后在 `server/.env` 中设置：
-
-```
+# 然后在 server/.env 设置：
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_interviewer
 ```
 
-### SQLite (默认)
-
-不配置 `DATABASE_URL` 时，默认使用 SQLite，无需额外安装。
-
-### 数据迁移
+已有数据迁移到 PostgreSQL：
 
 ```bash
 python server/scripts/migrate_to_pg.py
 ```
 
----
+> 仓库**不含** PostgreSQL 安装包（`pg/`、`pg.zip` 均被忽略）；容器部署时 PostgreSQL 由 `docker-compose.yml` 自动拉起。
 
-## 🔧 常用命令
+***
 
-| 命令 | 说明 |
-|------|------|
-| `npm run dev` | 前端开发模式 |
-| `npm run build` | 生产构建 (默认 web) |
-| `npm run build:web` | Web 模式构建 |
-| `npm run build:capacitor` | Capacitor 模式构建 |
-| `npm run build:miniprogram` | 小程序模式构建 |
-| `npm run typecheck` | TypeScript 类型检查 |
-| `npm run lint` | ESLint 代码检查（TS + Vue） |
-| `npm run preview` | 本地预览构建产物 |
+## 📱 跨端（Web / App / 小程序）
 
----
+同一套前端通过 Capacitor 打包 iOS / Android，通过 `<web-view>` + JSSI 桥接嵌入微信小程序。完整步骤（`npx cap add/sync`、小程序 `webViewUrl` 配置、JSBridge 通信表）见[《移动端集成指南》](docs/移动端集成指南.md)。
+
+***
+
+## 🏢 企业候选人初筛
+
+HR 在「企业控制台」创建邀请链接（岗位 / 难度 / 时长 / 可选 JD / 考察重点），候选人打开 `/invite/{token}` 填姓名即可作答（**无需注册**）；HR 按报告总分横向排名。控制台同时维护组织共享资源：**组织 JD 库**（`scope=org`）与**企业知识库**（进入本组织面试的 RAG 检索，不跨用户串检）。权限矩阵与实现细节见[《项目说明》](docs/项目说明.md)。
+
+***
+
+<a id="limits"></a>
+
+## ⚠️ 能力边界
+
+- 具身播报依赖公网可达的 `AVATAR_PROXY_BASE_URL`（魔珐云端回调地址），本地 `localhost` 无法验证完整语音链路
+- 离线规则模式不是大模型，出题与点评由内置题库 + 规则模板生成
+- 表情与富交互 Widget 的真机联动验证、错误码分级文案与断线重连提示仍在完善，完整待办见[《项目说明》](docs/项目说明.md) §7.3
+
+***
 
 ## 📖 文档
 
-- [项目说明](docs/项目说明.md) — 技术架构、创新点、能力现状与边界（对外版）
-- [需求文档](docs/需求文档.md)
-- [技术方案](docs/技术方案.md)
-- [三期技术方案 - 跨端移动与小程序](docs/三期技术方案-跨端移动与小程序.md)
-- [Docker 部署指南](DOCKER.md)
-- [变更日志](CHANGELOG.md)
+| 文档                                                                            | 内容                    |
+| ----------------------------------------------------------------------------- | --------------------- |
+| [项目说明.md](docs/项目说明.md)                                                       | 技术架构、创新点、能力现状与边界（对外版） |
+| [部署手册.md](docs/部署手册.md) / [部署文档.md](docs/部署文档.md) / [DOCKER.md](DOCKER.md)    | 生产部署、迭代升级、故障排查        |
+| [需求文档.md](docs/需求文档.md) / [技术方案.md](docs/技术方案.md)                             | 需求与总体设计               |
+| [三期技术方案-跨端移动与小程序.md](docs/三期技术方案-跨端移动与小程序.md) / [移动端集成指南.md](docs/移动端集成指南.md) | 跨端方案                  |
+| [MCP接入方案.md](docs/MCP接入方案.md)                                                 | MCP 工具接入设计            |
+| [自动化测试方案.md](docs/自动化测试方案.md)                                                 | 测试策略                  |
+| [CHANGELOG.md](CHANGELOG.md)                                                  | 变更日志                  |
 
----
+***
 
 ## 📄 License
 
