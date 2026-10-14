@@ -100,6 +100,12 @@ const menuSections = computed(() => [
     title: t('profile.settings.title'),
     items: [
       {
+        icon: '📁',
+        label: t('profile.settings.assets'),
+        desc: t('profile.settings.assetsDesc'),
+        path: '/assets',
+      },
+      {
         icon: '⚙️',
         label: t('profile.settings.admin'),
         desc: t('profile.settings.adminDesc'),

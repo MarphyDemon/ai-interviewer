@@ -206,6 +206,8 @@ export interface JobDescription {
   position: string
   /** 非空表示这是企业组织共享的 JD */
   orgId: number | null
+  /** 服务端判定当前用户是否可编辑/删除该 JD */
+  canManage: boolean
   createdAt: string
   updatedAt: string
 }

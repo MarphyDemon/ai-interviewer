@@ -105,6 +105,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/assets',
+      name: 'assets',
+      component: () => import('@/views/AssetsView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/settings',
       name: 'settings',
       component: () => import('@/views/SettingsView.vue'),

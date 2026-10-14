@@ -44,6 +44,19 @@ export function uploadJd(
   })
 }
 
+export function updateJd(
+  id: number,
+  payload: { title?: string; content?: string; position?: string },
+): Promise<JobDescription> {
+  const formData = new FormData()
+  if (payload.title !== undefined) formData.append('title', payload.title)
+  if (payload.content !== undefined) formData.append('content', payload.content)
+  if (payload.position !== undefined) formData.append('position', payload.position)
+  return client.put(`/jd/${id}`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
 export function deleteJd(id: number): Promise<void> {
   return client.delete(`/jd/${id}`)
 }

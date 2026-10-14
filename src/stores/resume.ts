@@ -27,5 +27,12 @@ export const useResumeStore = defineStore('resume', () => {
     await fetchResumes()
   }
 
-  return { resumes, loading, fetchResumes, upload, remove }
+  async function rename(id: number, filename: string) {
+    const updated = await resumeApi.renameResume(id, filename)
+    const idx = resumes.value.findIndex((r) => r.id === id)
+    if (idx !== -1) resumes.value[idx] = updated
+    return updated
+  }
+
+  return { resumes, loading, fetchResumes, upload, remove, rename }
 })

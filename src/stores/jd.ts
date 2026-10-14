@@ -33,6 +33,16 @@ export const useJdStore = defineStore('jd', () => {
     return jd
   }
 
+  async function updateJd(
+    id: number,
+    payload: { title?: string; content?: string; position?: string },
+  ) {
+    const updated = await jdApi.updateJd(id, payload)
+    const idx = jds.value.findIndex((j) => j.id === id)
+    if (idx !== -1) jds.value[idx] = updated
+    return updated
+  }
+
   async function deleteJd(id: number) {
     await jdApi.deleteJd(id)
     jds.value = jds.value.filter((j) => j.id !== id)
@@ -45,6 +55,7 @@ export const useJdStore = defineStore('jd', () => {
     fetchJds,
     createJd,
     uploadJd,
+    updateJd,
     deleteJd,
   }
 })

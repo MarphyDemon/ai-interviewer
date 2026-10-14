@@ -42,6 +42,10 @@ export function getResume(id: number): Promise<ResumeInfo> {
   return client.get(`/resume/${id}`)
 }
 
+export function renameResume(id: number, filename: string): Promise<ResumeInfo> {
+  return client.put(`/resume/${id}`, { filename })
+}
+
 export function deleteResume(id: number): Promise<void> {
   return client.delete(`/resume/${id}`)
 }
