@@ -129,6 +129,12 @@ body,
   .card {
     @apply rounded-2xl border border-primary-100/60 bg-white p-6 shadow-card;
   }
+
+  /* 表单输入框统一样式（登录 / 注册等）：固定 border 与 w-full，
+     保证聚焦前后尺寸一致，避免未聚焦时落回浏览器默认宽度。 */
+  .input {
+    @apply w-full rounded-lg border border-primary-200 bg-white px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 transition min-h-[44px] focus:border-primary-400 focus:outline-none focus:ring-2 focus:ring-primary-100;
+  }
 }
 
 /* 具身交互智能体舞台 9:16 竖版比例 */
@@ -138,6 +144,23 @@ body,
   max-width: 100%;
   height: 100%;
   margin: 0 auto;
+}
+
+/* Lottie 降级形象的「说话中」提示：lottieAvatarProvider 播报时切换 .speaking */
+@keyframes avatar-speaking {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgb(var(--primary-300) / 0.55);
+  }
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 0 8px rgb(var(--primary-300) / 0);
+  }
+}
+
+.lottie-avatar.speaking {
+  animation: avatar-speaking 1.1s ease-in-out infinite;
 }
 
 .avatar-stage #chat-avatar-container {
