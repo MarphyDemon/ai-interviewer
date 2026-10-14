@@ -82,6 +82,31 @@ async def get_resume(
     return _format_resume(resume)
 
 
+class RenameResumeReq(BaseModel):
+    filename: str
+
+
+@router.put("/{resume_id}")
+async def rename_resume(
+    resume_id: int,
+    req: RenameResumeReq,
+    session: Session = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """重命名简历显示名（只改展示名，不动文件与解析结果）。"""
+    resume = session.get(Resume, resume_id)
+    if not resume or resume.user_id != user.id:
+        raise HTTPException(404, "Resume not found")
+    name = req.filename.strip()
+    if not name:
+        raise HTTPException(400, "filename is required")
+    resume.filename = name
+    session.add(resume)
+    session.commit()
+    session.refresh(resume)
+    return _format_resume(resume)
+
+
 @router.delete("/{resume_id}")
 async def delete_resume(
     resume_id: int,
@@ -91,8 +116,9 @@ async def delete_resume(
     resume = session.get(Resume, resume_id)
     if not resume or resume.user_id != user.id:
         raise HTTPException(404, "Resume not found")
-    if os.path.exists(resume.file_path):
-        os.remove(resume.file_path)
+    # file_path 是存储 key（如 resumes/xxx.pdf），必须经 storage 层删除，
+    # 直接 os.path.exists/os.remove 会因相对 key 判断失败导致文件永久残留。
+    await storage.delete(resume.file_path)
     session.delete(resume)
     session.commit()
     return {"ok": True}

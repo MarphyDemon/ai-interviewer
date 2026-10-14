@@ -49,7 +49,10 @@ async def list_jds(
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
-    return [_format_jd(j) for j in _visible_jds(session, user)]
+    return [
+        _format_jd(j, org_service.can_manage_org_resource(session, user, j.user_id, j.org_id))
+        for j in _visible_jds(session, user)
+    ]
 
 
 @router.get("/{jd_id}")
@@ -61,7 +64,7 @@ async def get_jd(
     jd = session.get(JobDescription, jd_id)
     if not jd or not org_service.can_view_org_resource(session, user, jd.user_id, jd.org_id):
         raise HTTPException(404, "Job description not found")
-    return _format_jd(jd)
+    return _format_jd(jd, org_service.can_manage_org_resource(session, user, jd.user_id, jd.org_id))
 
 
 @router.post("")
@@ -83,7 +86,7 @@ async def create_jd(
     session.add(jd)
     session.commit()
     session.refresh(jd)
-    return _format_jd(jd)
+    return _format_jd(jd, True)
 
 
 @router.post("/upload")
@@ -125,7 +128,7 @@ async def upload_jd(
     session.add(jd)
     session.commit()
     session.refresh(jd)
-    return _format_jd(jd)
+    return _format_jd(jd, True)
 
 
 @router.put("/{jd_id}")
@@ -150,7 +153,7 @@ async def update_jd(
     session.add(jd)
     session.commit()
     session.refresh(jd)
-    return _format_jd(jd)
+    return _format_jd(jd, True)
 
 
 @router.delete("/{jd_id}")
@@ -167,7 +170,7 @@ async def delete_jd(
     return {"ok": True}
 
 
-def _format_jd(jd: JobDescription) -> dict:
+def _format_jd(jd: JobDescription, can_manage: bool) -> dict:
     return {
         "id": jd.id,
         "title": jd.title,
@@ -175,6 +178,8 @@ def _format_jd(jd: JobDescription) -> dict:
         "position": jd.position,
         # orgId 非空表示这是企业组织共享的 JD
         "orgId": jd.org_id,
+        # 服务端判定是否可编辑/删除：本人创建、超管、或组织 owner/hr
+        "canManage": can_manage,
         "createdAt": jd.created_at.isoformat() if jd.created_at else None,
         "updatedAt": jd.updated_at.isoformat() if jd.updated_at else None,
     }
